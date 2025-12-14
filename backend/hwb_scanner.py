@@ -12,6 +12,7 @@ from .hwb_data_manager import HWBDataManager
 import logging
 import warnings
 from .rs_calculator import RSCalculator
+from .image_generator import generate_stock_chart
 
 warnings.filterwarnings("ignore")
 logger = logging.getLogger(__name__)
@@ -913,8 +914,52 @@ class HWBScanner:
             # データ保存
             self.data_manager.save_symbol_data(symbol, symbol_data)
             logger.info(f"✅ Saved data for {symbol}")
+
+            # 静的チャート画像の生成（対象銘柄のみ）
+            self._generate_static_chart_if_needed(symbol, symbol_data, df_daily)
+
         except Exception as e:
             logger.error(f"Failed to save data for {symbol}: {e}", exc_info=True)
+
+    def _generate_static_chart_if_needed(self, symbol: str, symbol_data: dict, df_daily: pd.DataFrame):
+        """
+        対象カテゴリ（当日ブレイクアウト、直近5営業日、監視銘柄）に含まれる場合、
+        静的なチャート画像を生成する。
+        """
+        try:
+            latest_date = df_daily.index[-1].date()
+
+            # 5営業日前を計算（簡易的）
+            # 正確には _create_summary_from_data と同じロジックが必要だが、
+            # ここでは直近10日(暦日)以内程度で判定して生成しておく（広めに生成しても問題ない）
+            check_threshold_date = latest_date - timedelta(days=10)
+
+            is_target = False
+
+            # シグナルチェック (当日 or 直近)
+            for s in symbol_data.get('signals', []):
+                if 'breakout_date' in s:
+                    b_date = pd.to_datetime(s['breakout_date']).date()
+                    if b_date >= check_threshold_date:
+                        is_target = True
+                        break
+
+            # 監視銘柄チェック (FVG)
+            if not is_target:
+                for f in symbol_data.get('fvgs', []):
+                    if f.get('status') == 'active' and 'formation_date' in f:
+                        f_date = pd.to_datetime(f['formation_date']).date()
+                        if f_date >= check_threshold_date:
+                            is_target = True
+                            break
+
+            if is_target:
+                output_dir = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'charts')
+                generate_stock_chart(symbol, df_daily, output_dir)
+                logger.debug(f"Generated chart for {symbol}")
+
+        except Exception as e:
+            logger.error(f"Failed to generate static chart for {symbol}: {e}")
 
     def _generate_lightweight_chart_data(self, symbol_data: dict, df_daily: pd.DataFrame, df_weekly: pd.DataFrame) -> dict:
         """チャートデータ生成"""
