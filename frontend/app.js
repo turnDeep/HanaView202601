@@ -836,12 +836,23 @@ renderSymbolList(container, title, items, type) {
             dateInfo = item.fvg_date ? item.fvg_date.split('T')[0] : '';
         }
 
+        // Chart Image
+        const chartUrl = `charts/${item.symbol}.png?v=${new Date().getTime()}`;
         symbolItem.innerHTML = `
-            <span class="hwb-symbol-name">${item.symbol}</span>
-            ${rsRatingHtml}
-            ${volumeHtml}
-            <span class="hwb-symbol-date">${dateInfo}</span>
+            <div class="hwb-symbol-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                <span class="hwb-symbol-name">${item.symbol}</span>
+                ${rsRatingHtml}
+                ${volumeHtml}
+                <span class="hwb-symbol-date">${dateInfo}</span>
+            </div>
+            <div class="hwb-symbol-chart" style="width: 100%; margin-top: 10px;">
+                <img src="${chartUrl}" alt="${item.symbol} Chart" style="width: 100%; height: auto; border-radius: 4px;" loading="lazy" onerror="this.style.display='none'">
+            </div>
         `;
+        // Flex direction needs to be column for this layout
+        symbolItem.style.flexDirection = 'column';
+        symbolItem.style.alignItems = 'flex-start';
+
         list.appendChild(symbolItem);
     });
 

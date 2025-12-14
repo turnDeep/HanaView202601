@@ -1,6 +1,8 @@
 import math
 import matplotlib.pyplot as plt
 from matplotlib.patches import Wedge, Polygon, Circle
+import mplfinance as mpf
+import pandas as pd
 import os
 
 def get_fear_greed_category(value):
@@ -136,3 +138,43 @@ def generate_fear_greed_chart(data):
 
     plt.savefig(output_path, bbox_inches='tight', pad_inches=0.1)
     plt.close(fig)
+
+def generate_stock_chart(symbol, df_daily, output_dir):
+    """
+    Generates a candlestick chart for the given symbol and dataframe.
+    """
+    if df_daily is None or df_daily.empty:
+        return
+
+    # Fetch last 3 months
+    end_date = df_daily.index[-1]
+    start_date = end_date - pd.DateOffset(months=3)
+    df_subset = df_daily[df_daily.index >= start_date].copy()
+
+    if df_subset.empty:
+        return
+
+    # Create output directory if it doesn't exist
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    output_path = os.path.join(output_dir, f"{symbol}.png")
+
+    # Colors
+    mc = mpf.make_marketcolors(up='green', down='red', inherit=True)
+    s = mpf.make_mpf_style(marketcolors=mc)
+
+    # Moving Averages
+    ap = []
+    if 'sma200' in df_subset.columns:
+        ap.append(mpf.make_addplot(df_subset['sma200'], color='blue', width=1.0)) # 200SMA
+    if 'ema200' in df_subset.columns:
+        ap.append(mpf.make_addplot(df_subset['ema200'], color='orange', width=1.0)) # 200EMA
+
+    # Plot
+    mpf.plot(df_subset, type='candle', style=s, addplot=ap,
+             title=dict(title=symbol, fontsize=20),
+             savefig=dict(fname=output_path, dpi=70, bbox_inches='tight'), # Lower DPI for thumbnail-like usage
+             volume=False,
+             axisoff=True # Cleaner look for "in frame" display
+    )
