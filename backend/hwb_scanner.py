@@ -955,7 +955,7 @@ class HWBScanner:
 
             if is_target:
                 output_dir = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'charts')
-                generate_stock_chart(symbol, df_daily, output_dir)
+                generate_stock_chart(symbol, df_daily, output_dir, symbol_data)
                 logger.debug(f"Generated chart for {symbol}")
 
         except Exception as e:
