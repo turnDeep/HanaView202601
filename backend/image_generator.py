@@ -234,17 +234,7 @@ def generate_stock_chart(symbol, df_daily, output_dir, symbol_data=None):
             try:
                 f_date = pd.to_datetime(fvg['formation_date'])
 
-                # Filter: Draw all FVGs after the most recent setup
-                # If we have a latest setup date, verify this FVG is >= that date.
-                # If no setup date found, maybe draw all? But user said "after the most recent setup".
-                # I will default to drawing if it's in the chart range, but if we know latest setup, we enforce it.
-                if latest_setup_date and f_date < latest_setup_date:
-                    continue
-
-                # Check if date is in current plot range (or near enough to be relevant)
-                # We need the formation date to calculate start X.
-                # Even if formation is slightly before start_date, if it extends into the view, we might want to draw it.
-                # But simplify: only if formation date is in index or we can map it.
+                # Filter logic removed: Draw all FVGs in the 3-month window
 
                 # If f_date is in index:
                 if f_date in df_subset.index:
@@ -252,10 +242,8 @@ def generate_stock_chart(symbol, df_daily, output_dir, symbol_data=None):
                     # Candle 3 is at fvg_x_location. Candle 1 is 2 candles back.
                     rect_x = fvg_x_location - 2
 
-                    # Width: Extend to the end of the chart
-                    # Total length of chart
-                    chart_len = len(df_subset)
-                    width = chart_len - rect_x
+                    # Width: Approx 1 month (21 trading days)
+                    width = 21
 
                     lower_bound = float(fvg['lower_bound'])
                     upper_bound = float(fvg['upper_bound'])
@@ -265,12 +253,10 @@ def generate_stock_chart(symbol, df_daily, output_dir, symbol_data=None):
                         (rect_x, lower_bound),
                         width,
                         height,
-                        linewidth=0, # No border for the zone itself, or 1? User said "semi-transparent #00C000"
-                        # User code snippet: linewidth=1, edgecolor='#00C000'.
-                        # I'll stick to that but extend width.
+                        linewidth=0,
                         edgecolor='#00C000',
                         facecolor='#00C000',
-                        alpha=0.3 # Semi-transparent
+                        alpha=0.2 # Changed from 0.3 to 0.2
                     )
                     ax.add_patch(rect)
             except Exception as e:
