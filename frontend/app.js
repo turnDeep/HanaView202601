@@ -839,11 +839,15 @@ renderSymbolList(container, title, items, type) {
         // Chart Image
         const chartUrl = `charts/${item.symbol}.png?v=${new Date().getTime()}`;
         symbolItem.innerHTML = `
-            <div class="hwb-symbol-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                <span class="hwb-symbol-name">${item.symbol}</span>
-                ${rsRatingHtml}
-                ${volumeHtml}
-                <span class="hwb-symbol-date">${dateInfo}</span>
+            <div class="hwb-symbol-header" style="display: grid; grid-template-columns: auto auto; justify-content: space-between; gap: 5px; width: 100%;">
+                 <div style="display:flex; flex-direction:column; gap:2px;">
+                    <span class="hwb-symbol-name">${item.symbol}</span>
+                    ${rsRatingHtml}
+                 </div>
+                 <div style="display:flex; flex-direction:column; gap:2px; align-items:flex-end;">
+                    <span class="hwb-symbol-date">${dateInfo}</span>
+                    ${volumeHtml}
+                 </div>
             </div>
             <div class="hwb-symbol-chart" style="width: 100%; margin-top: 10px;">
                 <img src="${chartUrl}" alt="${item.symbol} Chart" style="width: 100%; height: auto; border-radius: 4px;" loading="lazy" onerror="this.style.display='none'">
