@@ -839,14 +839,14 @@ renderSymbolList(container, title, items, type) {
         // Chart Image
         const chartUrl = `charts/${item.symbol}.png?v=${new Date().getTime()}`;
         symbolItem.innerHTML = `
-            <div class="hwb-symbol-header" style="display: grid; grid-template-columns: auto auto; justify-content: space-between; gap: 5px; width: 100%;">
-                 <div style="display:flex; flex-direction:column; gap:2px;">
+            <div class="hwb-symbol-header" style="width: 100%;">
+                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
                     <span class="hwb-symbol-name">${item.symbol}</span>
-                    ${rsRatingHtml}
-                 </div>
-                 <div style="display:flex; flex-direction:column; gap:2px; align-items:flex-end;">
                     <span class="hwb-symbol-date">${dateInfo}</span>
-                    ${volumeHtml}
+                 </div>
+                 <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="display: flex; align-items: center;">${rsRatingHtml}</div>
+                    <div style="display: flex; align-items: center;">${volumeHtml}</div>
                  </div>
             </div>
             <div class="hwb-symbol-chart" style="width: 100%; margin-top: 10px;">
@@ -859,10 +859,10 @@ renderSymbolList(container, title, items, type) {
 
         list.appendChild(symbolItem);
 
-        // Add Long-Press Listener for the newly added image
+        // Add Double-Tap Listener for the newly added image
         const img = symbolItem.querySelector('.hwb-chart-img');
         if (img) {
-            this.addLongPressListener(img, chartUrl);
+            this.addDoubleTapListener(img, chartUrl);
         }
     });
 
@@ -870,36 +870,24 @@ renderSymbolList(container, title, items, type) {
     container.appendChild(section);
 }
 
-// ✅ 画像の長押しイベントリスナー追加
-addLongPressListener(element, imageUrl) {
-    let timer;
-    const longPressDuration = 1000; // 1 second
+// ✅ 画像のダブルタップイベントリスナー追加
+addDoubleTapListener(element, imageUrl) {
+    let lastTap = 0;
 
-    const startPress = (e) => {
-        // Prevent default only if needed, but for images inside scrolling containers,
-        // we usually want to allow scrolling unless the long press triggers.
-        // e.preventDefault();
-        timer = setTimeout(() => {
+    element.addEventListener('touchend', (e) => {
+        const currentTime = new Date().getTime();
+        const tapLength = currentTime - lastTap;
+        if (tapLength < 500 && tapLength > 0) {
+            e.preventDefault(); // Prevent zoom
             this.showImagePopup(imageUrl);
-        }, longPressDuration);
-    };
-
-    const cancelPress = () => {
-        if (timer) {
-            clearTimeout(timer);
-            timer = null;
         }
-    };
+        lastTap = currentTime;
+    });
 
-    // Touch events
-    element.addEventListener('touchstart', startPress, { passive: true });
-    element.addEventListener('touchend', cancelPress);
-    element.addEventListener('touchmove', cancelPress);
-
-    // Mouse events (for desktop testing)
-    element.addEventListener('mousedown', startPress);
-    element.addEventListener('mouseup', cancelPress);
-    element.addEventListener('mouseleave', cancelPress);
+    // For desktop testing
+    element.addEventListener('dblclick', () => {
+        this.showImagePopup(imageUrl);
+    });
 }
 
 // ✅ 画像ポップアップ表示
