@@ -850,7 +850,7 @@ renderSymbolList(container, title, items, type) {
                  </div>
             </div>
             <div class="hwb-symbol-chart" style="width: 100%; margin-top: 10px;">
-                <img src="${chartUrl}" alt="${item.symbol} Chart" style="width: 100%; height: auto; border-radius: 4px;" loading="lazy" onerror="this.style.display='none'">
+                <img src="${chartUrl}" alt="${item.symbol} Chart" class="hwb-chart-img" style="width: 100%; height: auto; border-radius: 4px;" loading="lazy" onerror="this.style.display='none'">
             </div>
         `;
         // Flex direction needs to be column for this layout
@@ -858,10 +858,73 @@ renderSymbolList(container, title, items, type) {
         symbolItem.style.alignItems = 'flex-start';
 
         list.appendChild(symbolItem);
+
+        // Add Long-Press Listener for the newly added image
+        const img = symbolItem.querySelector('.hwb-chart-img');
+        if (img) {
+            this.addLongPressListener(img, chartUrl);
+        }
     });
 
     section.appendChild(list);
     container.appendChild(section);
+}
+
+// ✅ 画像の長押しイベントリスナー追加
+addLongPressListener(element, imageUrl) {
+    let timer;
+    const longPressDuration = 1000; // 1 second
+
+    const startPress = (e) => {
+        // Prevent default only if needed, but for images inside scrolling containers,
+        // we usually want to allow scrolling unless the long press triggers.
+        // e.preventDefault();
+        timer = setTimeout(() => {
+            this.showImagePopup(imageUrl);
+        }, longPressDuration);
+    };
+
+    const cancelPress = () => {
+        if (timer) {
+            clearTimeout(timer);
+            timer = null;
+        }
+    };
+
+    // Touch events
+    element.addEventListener('touchstart', startPress, { passive: true });
+    element.addEventListener('touchend', cancelPress);
+    element.addEventListener('touchmove', cancelPress);
+
+    // Mouse events (for desktop testing)
+    element.addEventListener('mousedown', startPress);
+    element.addEventListener('mouseup', cancelPress);
+    element.addEventListener('mouseleave', cancelPress);
+}
+
+// ✅ 画像ポップアップ表示
+showImagePopup(imageUrl) {
+    // Create overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'image-popup-overlay';
+
+    // Create image
+    const img = document.createElement('img');
+    img.src = imageUrl;
+    img.className = 'image-popup-content';
+
+    // Prevent closing when clicking the image itself
+    img.addEventListener('click', (e) => {
+        e.stopPropagation();
+    });
+
+    // Close on overlay click
+    overlay.addEventListener('click', () => {
+        document.body.removeChild(overlay);
+    });
+
+    overlay.appendChild(img);
+    document.body.appendChild(overlay);
 }
 
 // ✅ RS Ratingの色分けメソッドを追加
