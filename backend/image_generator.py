@@ -162,8 +162,30 @@ def generate_stock_chart(symbol, df_daily, output_dir, symbol_data=None):
     output_path = os.path.join(output_dir, f"{symbol}.png")
 
     # Colors
-    mc = mpf.make_marketcolors(up='green', down='red', inherit=True)
-    s = mpf.make_mpf_style(marketcolors=mc)
+    marketcolors = mpf.make_marketcolors(
+        up='#00BFFF', # Deep Sky Blue
+        down='#DC143C', # Crimson
+        edge='lightgray',
+        wick={'up':'#00BFFF', 'down':'#DC143C'},
+        volume='inherit'
+    )
+
+    mpfstyle = mpf.make_mpf_style(
+        marketcolors=marketcolors,
+        gridcolor='lightgray',
+        facecolor='white',
+        edgecolor='black',
+        figcolor='white',
+        gridstyle='-',
+        gridaxis='both',
+        y_on_right=False,
+        rc = {
+            'xtick.color': 'black',
+            'ytick.color': 'black',
+            'axes.labelcolor': 'black',
+            # 'font.family': 'IPAexGothic',
+        }
+    )
 
     # Moving Averages
     ap = []
@@ -173,30 +195,67 @@ def generate_stock_chart(symbol, df_daily, output_dir, symbol_data=None):
         ap.append(mpf.make_addplot(df_subset['ema200'], color='orange', width=1.0)) # 200EMA
 
     # Plot
-    fig, axes = mpf.plot(df_subset, type='candle', style=s, addplot=ap,
-             title=dict(title=symbol, fontsize=20),
+    # Note: axisoff=False (default is False, but we want axes visible now as per styling request)
+    # The user request showed specific styling for axes, implying they should be visible.
+    # Previous code had axisoff=True. I will change it to default (False) or True?
+    # User said: "rc = {'xtick.color': 'black' ...}". This implies axes should be visible.
+    # Previous code was `axisoff=True`. I will remove `axisoff=True`.
+
+    fig, axes = mpf.plot(df_subset,
+             type='candle',
+             style=mpfstyle,
+             addplot=ap,
              returnfig=True,
-             volume=False,
-             axisoff=True # Cleaner look for "in frame" display
+             volume=True,
+             datetime_format='%m/%d',
+             xrotation=0,
+             show_nontrading=False,
+             ylabel='', # Remove Y-axis label text to keep it clean, or use 'Price'
+             ylabel_lower='',
+             # no title
     )
 
     # Draw FVGs if provided
     if symbol_data and 'fvgs' in symbol_data:
+        # Determine the latest setup date
+        latest_setup_date = None
+        if 'setups' in symbol_data and symbol_data['setups']:
+            try:
+                # setups have 'date' field
+                dates = [pd.to_datetime(s['date']) for s in symbol_data['setups']]
+                if dates:
+                    latest_setup_date = max(dates)
+            except Exception as e:
+                print(f"Error finding latest setup date for {symbol}: {e}")
+
         ax = axes[0]
+        # Iterate FVGs
         for fvg in symbol_data['fvgs']:
             try:
-                # formation_date might be string or timestamp
                 f_date = pd.to_datetime(fvg['formation_date'])
 
-                # Check if date is in current plot range
+                # Filter: Draw all FVGs after the most recent setup
+                # If we have a latest setup date, verify this FVG is >= that date.
+                # If no setup date found, maybe draw all? But user said "after the most recent setup".
+                # I will default to drawing if it's in the chart range, but if we know latest setup, we enforce it.
+                if latest_setup_date and f_date < latest_setup_date:
+                    continue
+
+                # Check if date is in current plot range (or near enough to be relevant)
+                # We need the formation date to calculate start X.
+                # Even if formation is slightly before start_date, if it extends into the view, we might want to draw it.
+                # But simplify: only if formation date is in index or we can map it.
+
+                # If f_date is in index:
                 if f_date in df_subset.index:
                     fvg_x_location = df_subset.index.get_loc(f_date)
-                    rect_x = fvg_x_location - 2 # Adjust x-position to start at Candle 1
+                    # Candle 3 is at fvg_x_location. Candle 1 is 2 candles back.
+                    rect_x = fvg_x_location - 2
 
-                    # Ensure rect_x is within bounds (though negative is handled by matplotlib usually,
-                    # but logic says candle 1 is 2 candles back)
-                    # If fvg_x_location < 2, it means the FVG formation started before the chart visible area
-                    # but we can still try to draw it.
+                    # Width: Extend to the end of the chart
+                    # Total length of chart
+                    chart_len = len(df_subset)
+                    width = chart_len - rect_x
 
                     lower_bound = float(fvg['lower_bound'])
                     upper_bound = float(fvg['upper_bound'])
@@ -204,12 +263,14 @@ def generate_stock_chart(symbol, df_daily, output_dir, symbol_data=None):
 
                     rect = Rectangle(
                         (rect_x, lower_bound),
-                        2, # Width covering Candle 1 to Candle 3
+                        width,
                         height,
-                        linewidth=1,
+                        linewidth=0, # No border for the zone itself, or 1? User said "semi-transparent #00C000"
+                        # User code snippet: linewidth=1, edgecolor='#00C000'.
+                        # I'll stick to that but extend width.
                         edgecolor='#00C000',
                         facecolor='#00C000',
-                        alpha=0.3
+                        alpha=0.3 # Semi-transparent
                     )
                     ax.add_patch(rect)
             except Exception as e:
