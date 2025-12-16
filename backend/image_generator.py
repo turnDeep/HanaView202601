@@ -1,6 +1,6 @@
 import math
 import matplotlib.pyplot as plt
-from matplotlib.patches import Wedge, Polygon, Circle
+from matplotlib.patches import Wedge, Polygon, Circle, Rectangle
 import mplfinance as mpf
 import pandas as pd
 import os
@@ -139,7 +139,7 @@ def generate_fear_greed_chart(data):
     plt.savefig(output_path, bbox_inches='tight', pad_inches=0.1)
     plt.close(fig)
 
-def generate_stock_chart(symbol, df_daily, output_dir):
+def generate_stock_chart(symbol, df_daily, output_dir, fvgs=None):
     """
     Generates a candlestick chart for the given symbol and dataframe.
     """
@@ -171,10 +171,77 @@ def generate_stock_chart(symbol, df_daily, output_dir):
     if 'ema200' in df_subset.columns:
         ap.append(mpf.make_addplot(df_subset['ema200'], color='orange', width=1.0)) # 200EMA
 
-    # Plot
-    mpf.plot(df_subset, type='candle', style=s, addplot=ap,
-             title=dict(title=symbol, fontsize=20),
-             savefig=dict(fname=output_path, dpi=70, bbox_inches='tight'), # Lower DPI for thumbnail-like usage
-             volume=False,
-             axisoff=True # Cleaner look for "in frame" display
+    # Plot configuration
+    plot_kwargs = dict(
+        type='candle',
+        style=s,
+        addplot=ap,
+        title=dict(title=symbol, fontsize=20),
+        volume=False,
+        axisoff=True,
+        returnfig=True
     )
+
+    # Generate plot
+    fig, axlist = mpf.plot(df_subset, **plot_kwargs)
+    ax = axlist[0]
+
+    # Draw FVG rectangles
+    if fvgs:
+        for fvg in fvgs:
+            try:
+                formation_date = fvg.get('formation_date')
+                if isinstance(formation_date, str):
+                    formation_date = pd.to_datetime(formation_date)
+
+                # Check overlap or relative position
+                # We want to draw active FVGs even if they formed before the visible window,
+                # provided they extend into it.
+                # However, without exact start/end logic for consumed ones, let's stick to formation_date logic for now
+                # or just check if formation_date is roughly in range or before.
+
+                # Simple logic: If formation_date is in subset, start there.
+                # If it's before, start at 0.
+                # If it's after, skip.
+
+                start_date_ts = df_subset.index[0]
+
+                if formation_date >= start_date_ts:
+                    if formation_date in df_subset.index:
+                        # FVG forms at candle 3 (formation_date).
+                        # Rectangle starts at candle 1 (index - 2).
+                        x_start = df_subset.index.get_loc(formation_date) - 2
+                    else:
+                        continue # Should be covered by >= start_date_ts check if index is sorted
+                else:
+                    # Formed before window. Start at 0.
+                    x_start = 0
+
+                # Ensure x_start is not less than 0 (visually)
+                if x_start < 0:
+                    x_start = 0
+
+                # Extend to the right edge
+                x_end = len(df_subset)
+                width = x_end - x_start
+
+                lower = fvg.get('lower_bound')
+                upper = fvg.get('upper_bound')
+                height = upper - lower
+
+                rect = Rectangle(
+                    (x_start, lower),
+                    width=width,
+                    height=height,
+                    facecolor='#00C000',
+                    alpha=0.3,
+                    edgecolor=None
+                )
+                ax.add_patch(rect)
+
+            except Exception as e:
+                pass
+
+    # Save
+    fig.savefig(output_path, dpi=70, bbox_inches='tight')
+    plt.close(fig)

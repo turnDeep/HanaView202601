@@ -955,8 +955,13 @@ class HWBScanner:
 
             if is_target:
                 output_dir = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'charts')
-                generate_stock_chart(symbol, df_daily, output_dir)
-                logger.debug(f"Generated chart for {symbol}")
+                # FVG情報を抽出して渡す
+                fvgs = symbol_data.get('fvgs', [])
+                active_fvgs = [f for f in fvgs if f.get('status') == 'active']
+
+                # チャート生成
+                generate_stock_chart(symbol, df_daily, output_dir, fvgs=active_fvgs)
+                logger.debug(f"Generated chart for {symbol} with {len(active_fvgs)} active FVGs")
 
         except Exception as e:
             logger.error(f"Failed to generate static chart for {symbol}: {e}")
