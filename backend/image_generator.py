@@ -1,6 +1,6 @@
 import math
 import matplotlib.pyplot as plt
-from matplotlib.patches import Wedge, Polygon, Circle
+from matplotlib.patches import Wedge, Polygon, Circle, Rectangle
 import mplfinance as mpf
 import pandas as pd
 import os
@@ -139,9 +139,10 @@ def generate_fear_greed_chart(data):
     plt.savefig(output_path, bbox_inches='tight', pad_inches=0.1)
     plt.close(fig)
 
-def generate_stock_chart(symbol, df_daily, output_dir):
+def generate_stock_chart(symbol, df_daily, output_dir, symbol_data=None):
     """
     Generates a candlestick chart for the given symbol and dataframe.
+    If symbol_data is provided, draws detected FVGs.
     """
     if df_daily is None or df_daily.empty:
         return
@@ -172,9 +173,47 @@ def generate_stock_chart(symbol, df_daily, output_dir):
         ap.append(mpf.make_addplot(df_subset['ema200'], color='orange', width=1.0)) # 200EMA
 
     # Plot
-    mpf.plot(df_subset, type='candle', style=s, addplot=ap,
+    fig, axes = mpf.plot(df_subset, type='candle', style=s, addplot=ap,
              title=dict(title=symbol, fontsize=20),
-             savefig=dict(fname=output_path, dpi=70, bbox_inches='tight'), # Lower DPI for thumbnail-like usage
+             returnfig=True,
              volume=False,
              axisoff=True # Cleaner look for "in frame" display
     )
+
+    # Draw FVGs if provided
+    if symbol_data and 'fvgs' in symbol_data:
+        ax = axes[0]
+        for fvg in symbol_data['fvgs']:
+            try:
+                # formation_date might be string or timestamp
+                f_date = pd.to_datetime(fvg['formation_date'])
+
+                # Check if date is in current plot range
+                if f_date in df_subset.index:
+                    fvg_x_location = df_subset.index.get_loc(f_date)
+                    rect_x = fvg_x_location - 2 # Adjust x-position to start at Candle 1
+
+                    # Ensure rect_x is within bounds (though negative is handled by matplotlib usually,
+                    # but logic says candle 1 is 2 candles back)
+                    # If fvg_x_location < 2, it means the FVG formation started before the chart visible area
+                    # but we can still try to draw it.
+
+                    lower_bound = float(fvg['lower_bound'])
+                    upper_bound = float(fvg['upper_bound'])
+                    height = upper_bound - lower_bound
+
+                    rect = Rectangle(
+                        (rect_x, lower_bound),
+                        2, # Width covering Candle 1 to Candle 3
+                        height,
+                        linewidth=1,
+                        edgecolor='#00C000',
+                        facecolor='#00C000',
+                        alpha=0.3
+                    )
+                    ax.add_patch(rect)
+            except Exception as e:
+                print(f"Error drawing FVG for {symbol}: {e}")
+
+    fig.savefig(output_path, dpi=70, bbox_inches='tight')
+    plt.close(fig)
