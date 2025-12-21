@@ -317,16 +317,20 @@ document.addEventListener('DOMContentLoaded', () => {
     function applyTabPermissions() {
         const permission = AuthManager.getPermission();
         const hwb200Tab = document.querySelector('.tab-button[data-tab="hwb200"]');
+        const algoTab = document.querySelector('.tab-button[data-tab="algo"]');
 
         console.log(`Applying permissions for level: ${permission}`);
 
         if (hwb200Tab) hwb200Tab.style.display = '';
+        if (algoTab) algoTab.style.display = '';
 
         if (permission === 'standard') {
-            console.log("Standard permission: Hiding 200MA and Stage1+2 tabs.");
+            console.log("Standard permission: Hiding 200MA and Algo tabs.");
             if (hwb200Tab) hwb200Tab.style.display = 'none';
+            if (algoTab) algoTab.style.display = 'none';
         } else if (permission === 'secret') {
-            console.log("Secret permission: Hiding Stage1+2 tab.");
+            console.log("Secret permission: Hiding Algo tab.");
+            if (algoTab) algoTab.style.display = 'none';
         } else if (permission === 'ura') {
             console.log("Ura permission: All tabs visible.");
         }
@@ -366,6 +370,10 @@ async function showDashboard() {
 
         if (document.getElementById('hwb200-content')) {
             initHWB200MA();
+        }
+
+        if (document.getElementById('algo-content')) {
+            initAlgoTab();
         }
 
         dashboardContainer.dataset.initialized = 'true';
@@ -488,11 +496,473 @@ async function showDashboard() {
                 window.hwb200Manager.loadData();
             }
 
+            if (targetTab === 'algo' && window.algoManager) {
+                window.algoManager.loadData();
+            }
+
             setTimeout(() => window.scrollTo(0, 0), 0);
         });
     }
 
     // --- HWB 200MA Manager ---
+    // --- Algo Manager ---
+    function initAlgoTab() {
+        window.algoManager = new AlgoManager();
+        console.log('AlgoManager initialized');
+    }
+
+    class AlgoManager {
+        constructor() {
+            this.summaryData = null;
+            this.currentView = 'summary';
+            this.activeScreener = 'momentum_97'; // デフォルト
+            this.initEventListeners();
+        }
+
+        initEventListeners() {
+            // スクリーナーボタンのイベント
+            const screenerButtons = document.querySelectorAll('.screener-btn');
+            screenerButtons.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    this.activeScreener = btn.dataset.screener;
+                    this.switchScreener(btn.dataset.screener);
+                });
+            });
+
+            // 検索ボタンのイベント
+            const searchBtn = document.getElementById('algo-analyze-btn');
+            if (searchBtn) {
+                searchBtn.addEventListener('click', () => {
+                    if (searchBtn.dataset.state === 'reset') {
+                        this.resetToSummary();
+                    } else {
+                        this.searchTicker();
+                    }
+                });
+            }
+        }
+
+        async loadData() {
+            this.showStatus('最新のAlgoデータを読み込み中...', 'info');
+
+            try {
+                const response = await fetchWithAuth('/api/algo/daily/latest');
+
+                if (!response.ok) {
+                    if (response.status === 404) {
+                        this.showStatus('データがありません。スキャンを実行してください。', 'warning');
+                        return;
+                    }
+                    throw new Error(`サーバーエラー: ${response.status}`);
+                }
+
+                this.summaryData = await response.json();
+                this.currentView = 'summary';
+                this.render();
+
+                const { updated_at, volatility_distribution } = this.summaryData;
+                const displayDate = formatDateForDisplay(updated_at);
+
+                this.showStatus(
+                    `最終更新: ${displayDate} | 緑: ${volatility_distribution.contraction} | 黄: ${volatility_distribution.transition} | 赤: ${volatility_distribution.expansion}`,
+                    'info'
+                );
+
+            } catch (error) {
+                console.error('Algo data loading error:', error);
+                this.showStatus(`❌ データ読み込みエラー: ${error.message}`, 'error');
+            }
+        }
+
+        switchScreener(screenerKey) {
+            // ボタンのアクティブ状態を更新
+            document.querySelectorAll('.screener-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.screener === screenerKey);
+            });
+
+            this.activeScreener = screenerKey;
+            this.render();
+        }
+
+        render() {
+            if (!this.summaryData) return;
+
+            const container = document.getElementById('algo-content-area');
+            container.innerHTML = '';
+
+            this.renderSummaryStats(container);
+            this.renderSymbolList(container);
+        }
+
+        renderSummaryStats(container) {
+            const { summary, volatility_distribution } = this.summaryData;
+            const screenerData = summary[this.activeScreener] || [];
+
+            const statsDiv = document.createElement('div');
+            statsDiv.className = 'algo-summary-stats';
+            statsDiv.innerHTML = `
+      <h2>${this.getScreenerDisplayName(this.activeScreener)}</h2>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <span class="stat-label">銘柄数</span>
+          <span class="stat-value">${screenerData.length}</span>
+        </div>
+        <div class="stat-card green">
+          <span class="stat-label">凪（緑）</span>
+          <span class="stat-value">${screenerData.filter(s => s.volatility_regime === 'contraction').length}</span>
+        </div>
+        <div class="stat-card yellow">
+          <span class="stat-label">通常（黄）</span>
+          <span class="stat-value">${screenerData.filter(s => s.volatility_regime === 'transition').length}</span>
+        </div>
+        <div class="stat-card red">
+          <span class="stat-label">嵐（赤）</span>
+          <span class="stat-value">${screenerData.filter(s => s.volatility_regime === 'expansion').length}</span>
+        </div>
+      </div>
+    `;
+
+            container.appendChild(statsDiv);
+        }
+
+        renderSymbolList(container) {
+            const { summary } = this.summaryData;
+            const screenerData = summary[this.activeScreener] || [];
+
+            if (screenerData.length === 0) {
+                container.innerHTML += '<p class="no-data">このスクリーナーには該当銘柄がありません。</p>';
+                return;
+            }
+
+            // ボラティリティレジーム順にソート
+            const sortOrder = { 'contraction': 0, 'transition': 1, 'expansion': 2 };
+            const sortedData = [...screenerData].sort((a, b) => {
+                return sortOrder[a.volatility_regime] - sortOrder[b.volatility_regime];
+            });
+
+            const listDiv = document.createElement('div');
+            listDiv.className = 'algo-symbol-list';
+
+            sortedData.forEach(item => {
+                const symbolItem = this.createSymbolItem(item);
+                listDiv.appendChild(symbolItem);
+            });
+
+            container.appendChild(listDiv);
+        }
+
+        createSymbolItem(item) {
+            const itemDiv = document.createElement('div');
+            itemDiv.className = 'algo-symbol-item';
+
+            const regimeClass = `regime-${item.volatility_regime}`;
+            const regimeLabel = this.getRegimeLabel(item.volatility_regime);
+
+            const chartUrl = `/charts/algo/${item.symbol}_gamma_analysis.png?v=${new Date().getTime()}`;
+
+            itemDiv.innerHTML = `
+      <div class="symbol-header">
+        <span class="symbol-name">${item.symbol}</span>
+        <span class="regime-badge ${regimeClass}">${regimeLabel}</span>
+      </div>
+      <div class="symbol-meta">
+        ${this.renderMetaInfo(item)}
+      </div>
+      <div class="symbol-chart">
+        <img src="${chartUrl}" alt="${item.symbol} Gamma Analysis" class="algo-chart-img" loading="lazy" onerror="this.style.display='none'">
+      </div>
+    `;
+
+            // ダブルタップリスナーを追加
+            const img = itemDiv.querySelector('.algo-chart-img');
+            if (img) {
+                this.addDoubleTapListener(img, item.symbol);
+            }
+
+            return itemDiv;
+        }
+
+        renderMetaInfo(item) {
+            let metaHtml = '';
+
+            if (item.rs_rating !== undefined && item.rs_rating !== null) {
+                const rsClass = this.getRSClass(item.rs_rating);
+                metaHtml += `<span class="meta-badge ${rsClass}">RS ${item.rs_rating}</span>`;
+            }
+
+            if (item.eps_growth_pct !== undefined && item.eps_growth_pct !== null) {
+                metaHtml += `<span class="meta-badge eps-badge">EPS +${item.eps_growth_pct}%</span>`;
+            }
+
+            if (item.volume_increase_pct !== undefined && item.volume_increase_pct !== null) {
+                metaHtml += `<span class="meta-badge vol-badge">Vol +${item.volume_increase_pct}%</span>`;
+            }
+
+            if (item.expected_move_30d !== undefined && item.expected_move_30d !== null) {
+                metaHtml += `<span class="meta-badge move-badge">30日予想 ±${item.expected_move_30d}%</span>`;
+            }
+
+            return metaHtml;
+        }
+
+        getScreenerDisplayName(screenerKey) {
+            const names = {
+                'momentum_97': 'Momentum 97 - 短期中期長期の最強銘柄',
+                'explosive_eps': 'Explosive EPS Growth - 爆発的EPS成長銘柄',
+                'up_on_volume': 'Up on Volume - 出来高急増上昇銘柄',
+                'top_2pct_rs': 'Top 2% RS Rating - 相対強度トップ2%銘柄',
+                'bullish_4pct': '4% Bullish Yesterday - 急騰直後銘柄',
+                'healthy_chart': 'Healthy Chart Watch - 健全チャート銘柄'
+            };
+            return names[screenerKey] || screenerKey;
+        }
+
+        getRegimeLabel(regime) {
+            const labels = {
+                'contraction': '🟢 凪',
+                'transition': '🟡 通常',
+                'expansion': '🔴 嵐'
+            };
+            return labels[regime] || regime;
+        }
+
+        getRSClass(rsRating) {
+            if (rsRating >= 90) return 'rs-excellent';
+            if (rsRating >= 80) return 'rs-good';
+            if (rsRating >= 70) return 'rs-average';
+            return 'rs-weak';
+        }
+
+        addDoubleTapListener(element, symbol) {
+            let lastTap = 0;
+
+            element.addEventListener('touchend', (e) => {
+                const currentTime = new Date().getTime();
+                const tapLength = currentTime - lastTap;
+                if (tapLength < 500 && tapLength > 0) {
+                    e.preventDefault();
+                    this.showImagePopup(symbol);
+                }
+                lastTap = currentTime;
+            });
+
+            // デスクトップ用
+            element.addEventListener('dblclick', () => {
+                this.showImagePopup(symbol);
+            });
+        }
+
+        async showImagePopup(symbol) {
+            try {
+                // 個別銘柄データを取得
+                const response = await fetchWithAuth(`/api/algo/symbols/${symbol}`);
+                const data = await response.json();
+
+                // オーバーレイ作成
+                const overlay = document.createElement('div');
+                overlay.className = 'algo-image-popup-overlay';
+
+                // コンテンツコンテナ
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'algo-popup-content';
+
+                // 画像
+                const img = document.createElement('img');
+                img.src = data.analysis_data.gamma_plot;
+                img.className = 'algo-popup-image';
+
+                // Gemini解説
+                const analysisDiv = document.createElement('div');
+                analysisDiv.className = 'algo-popup-analysis';
+
+                if (data.gemini_analysis) {
+                    analysisDiv.innerHTML = `
+          <h3>AI解説 (Gemini)</h3>
+          <p>${data.gemini_analysis.replace(/\n/g, '<br>')}</p>
+        `;
+                } else {
+                    analysisDiv.innerHTML = `
+          <p class="no-analysis">${data.message || 'この銘柄はスクリーナーに含まれていません。'}</p>
+        `;
+                }
+
+                contentDiv.appendChild(img);
+                contentDiv.appendChild(analysisDiv);
+                overlay.appendChild(contentDiv);
+
+                // クローズイベント
+                overlay.addEventListener('click', (e) => {
+                    if (e.target === overlay) {
+                        document.body.removeChild(overlay);
+                    }
+                });
+
+                document.body.appendChild(overlay);
+
+            } catch (error) {
+                console.error('Error loading symbol data:', error);
+                alert('銘柄データの読み込みに失敗しました。');
+            }
+        }
+
+        async searchTicker() {
+            const input = document.getElementById('algo-ticker-input');
+            const ticker = input.value.trim().toUpperCase();
+
+            if (!ticker) {
+                this.showStatus('ティッカーシンボルを入力してください', 'warning');
+                return;
+            }
+
+            this.showStatus(`${ticker}のデータを検索中...`, 'info');
+
+            try {
+                // まずキャッシュを確認
+                const response = await fetchWithAuth(`/api/algo/analyze_ticker?ticker=${ticker}&force=false`);
+
+                if (!response.ok) {
+                    if (response.status === 404) {
+                        // キャッシュにない場合、ユーザーに確認
+                        const shouldAnalyze = confirm(`${ticker}はスクリーナーに含まれていません。\n新規に分析を実行しますか？（Gemini解説は含まれません）`);
+
+                        if (shouldAnalyze) {
+                            await this.forceAnalyzeTicker(ticker);
+                        } else {
+                            this.showStatus('検索をキャンセルしました', 'info');
+                        }
+                        return;
+                    }
+                    throw new Error(`検索に失敗しました: ${response.status}`);
+                }
+
+                const symbolData = await response.json();
+                this.renderSearchResults(ticker, symbolData);
+
+                const searchBtn = document.getElementById('algo-analyze-btn');
+                if (searchBtn) {
+                    searchBtn.textContent = 'リセット';
+                    searchBtn.dataset.state = 'reset';
+                }
+
+                this.showStatus(`✅ ${ticker}の検索結果を表示中`, 'info');
+
+            } catch (error) {
+                console.error('Search error:', error);
+                this.showStatus(`❌ エラー: ${error.message}`, 'error');
+            }
+        }
+
+        async forceAnalyzeTicker(ticker) {
+            this.showStatus(`${ticker}を分析中... (30秒程度かかります)`, 'info');
+
+            try {
+                const response = await fetchWithAuth(`/api/algo/analyze_ticker?ticker=${ticker}&force=true`);
+
+                if (!response.ok) {
+                    throw new Error(`分析に失敗しました: ${response.status}`);
+                }
+
+                const symbolData = await response.json();
+                this.renderSearchResults(ticker, symbolData);
+
+                const searchBtn = document.getElementById('algo-analyze-btn');
+                if (searchBtn) {
+                    searchBtn.textContent = 'リセット';
+                    searchBtn.dataset.state = 'reset';
+                }
+
+                this.showStatus(`✅ ${ticker}の分析が完了しました`, 'info');
+
+            } catch (error) {
+                console.error('Force analysis error:', error);
+                this.showStatus(`❌ 分析エラー: ${error.message}`, 'error');
+            }
+        }
+
+        renderSearchResults(ticker, symbolData) {
+            const container = document.getElementById('algo-content-area');
+            container.innerHTML = '';
+
+            const resultDiv = document.createElement('div');
+            resultDiv.className = 'algo-search-results';
+
+            const regimeClass = `regime-${symbolData.volatility_regime}`;
+            const regimeLabel = this.getRegimeLabel(symbolData.volatility_regime);
+
+            resultDiv.innerHTML = `
+      <div class="search-result-header">
+        <h2>${ticker} の分析結果</h2>
+        <span class="regime-badge ${regimeClass}">${regimeLabel}</span>
+      </div>
+    `;
+
+            if (symbolData.screener_sources && symbolData.screener_sources.length > 0) {
+                const screenerInfo = document.createElement('div');
+                screenerInfo.className = 'screener-info';
+                screenerInfo.innerHTML = `
+        <p><strong>該当スクリーナー:</strong> ${symbolData.screener_sources.map(s => this.getScreenerDisplayName(s)).join(', ')}</p>
+      `;
+                resultDiv.appendChild(screenerInfo);
+            }
+
+            // チャート画像
+            const chartDiv = document.createElement('div');
+            chartDiv.className = 'search-result-chart';
+            chartDiv.innerHTML = `
+      <img src="${symbolData.analysis_data.gamma_plot}" alt="${ticker} Gamma Analysis" class="algo-chart-img-large">
+    `;
+            resultDiv.appendChild(chartDiv);
+
+            // Gemini解説
+            if (symbolData.gemini_analysis) {
+                const analysisDiv = document.createElement('div');
+                analysisDiv.className = 'search-result-analysis';
+                analysisDiv.innerHTML = `
+        <h3>AI解説 (Gemini)</h3>
+        <p>${symbolData.gemini_analysis.replace(/\n/g, '<br>')}</p>
+      `;
+                resultDiv.appendChild(analysisDiv);
+            } else if (symbolData.message) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'search-result-message';
+                messageDiv.innerHTML = `<p>${symbolData.message}</p>`;
+                resultDiv.appendChild(messageDiv);
+            }
+
+            container.appendChild(resultDiv);
+        }
+
+        resetToSummary() {
+            this.currentView = 'summary';
+            const input = document.getElementById('algo-ticker-input');
+            if (input) input.value = '';
+
+            const searchBtn = document.getElementById('algo-analyze-btn');
+            if (searchBtn) {
+                searchBtn.textContent = '検索';
+                searchBtn.dataset.state = 'search';
+            }
+
+            this.render();
+
+            const { updated_at, volatility_distribution } = this.summaryData;
+            const displayDate = formatDateForDisplay(updated_at);
+
+            this.showStatus(
+                `最終更新: ${displayDate} | 緑: ${volatility_distribution.contraction} | 黄: ${volatility_distribution.transition} | 赤: ${volatility_distribution.expansion}`,
+                'info'
+            );
+        }
+
+        showStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('algo-status');
+            if (statusDiv) {
+                statusDiv.textContent = message;
+                statusDiv.className = `algo-status-info ${type}`;
+            }
+        }
+    }
+
     function initHWB200MA() {
         window.hwb200Manager = new HWB200MAManager();
         console.log('HWB200MAManager initialized');

@@ -18,6 +18,7 @@ from io import StringIO
 from urllib.parse import urlparse
 from .image_generator import generate_fear_greed_chart
 from dotenv import load_dotenv
+from .gemini_client import gemini_client
 
 # Load environment variables from .env file
 load_dotenv()
@@ -141,15 +142,10 @@ class MarketDataFetcher:
         # yfinance用のセッションも別途作成
         self.yf_session = Session(impersonate="safari15_5")
         self.data = {"market": {}, "news": [], "indicators": {"economic": [], "us_earnings": [], "jp_earnings": []}}
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            logger.warning(f"[E001] {ERROR_CODES['E001']} AI functions will be skipped.")
-            self.openai_client = None
-            self.openai_model = None
-        else:
-            http_client = httpx.Client(trust_env=False)
-            self.openai_client = openai.OpenAI(api_key=api_key, http_client=http_client)
-            self.openai_model = os.getenv("OPENAI_MODEL", "gpt-4-turbo") # Fallback for safety
+
+        # Use Gemini Client instead of OpenAI
+        self.openai_client = None # Deprecated
+        self.openai_model = None # Deprecated
 
     def _clean_non_compliant_floats(self, obj):
         if isinstance(obj, dict):
@@ -824,46 +820,24 @@ class MarketDataFetcher:
         return heatmaps
 
     # --- AI Generation ---
-    def _call_openai_api(self, messages, max_tokens, temperature=0.7, response_format=None, top_p=1.0, frequency_penalty=0.0, presence_penalty=0.0):
-        """A generalized method to call the OpenAI Chat Completions API."""
-        if not self.openai_client or not self.openai_model:
-            raise MarketDataError("E005", "OpenAI client or model is not available.")
+    def _call_gemini_api(self, prompt, max_tokens=None):
+        """A generalized method to call the Gemini API."""
         try:
-            logger.info(f"Calling OpenAI API (model={self.openai_model}, max_tokens={max_tokens})...")
-
-            kwargs = {
-                "model": self.openai_model,
-                "messages": messages,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-                "top_p": top_p,
-                "frequency_penalty": frequency_penalty,
-                "presence_penalty": presence_penalty,
-            }
-            if response_format:
-                kwargs["response_format"] = response_format
-
-            response = self.openai_client.chat.completions.create(**kwargs)
-
-            logger.debug(f"Response object type: {type(response)}")
-            if hasattr(response, 'model'): logger.debug(f"Response model: {response.model}")
-            if hasattr(response, 'usage'): logger.debug(f"Response usage: {response.usage}")
-
-            if not response or not response.choices:
-                logger.error("Empty response from OpenAI API")
-                raise MarketDataError("E005", "Empty response from OpenAI API")
-
-            if response.choices[0].finish_reason == 'length':
-                logger.warning("Response may be truncated due to max_completion_tokens limit.")
-
-            content = response.choices[0].message.content
+            logger.info(f"Calling Gemini API...")
+            content = gemini_client.generate_content(prompt)
 
             if not content:
-                logger.error("Empty content in OpenAI API response")
-                raise MarketDataError("E005", "Empty content in OpenAI API response")
+                logger.error("Empty content in Gemini API response")
+                raise MarketDataError("E005", "Empty content in Gemini API response")
 
             content = content.strip()
             logger.debug(f"Received response (first 200 chars): {content[:200]}")
+
+            # Clean markdown code blocks if present
+            if content.startswith("```json"):
+                content = content.replace("```json", "").replace("```", "").strip()
+            elif content.startswith("```"):
+                content = content.replace("```", "").strip()
 
             try:
                 return json.loads(content)
@@ -871,11 +845,8 @@ class MarketDataFetcher:
                 logger.error(f"Failed to parse JSON response: {content[:500]}")
                 raise MarketDataError("E005", f"Invalid JSON response: {je}") from je
 
-        except openai.APIError as api_error:
-            logger.error(f"OpenAI API error: {api_error}")
-            raise MarketDataError("E005", f"API error: {api_error}") from api_error
         except Exception as e:
-            logger.error(f"Error calling OpenAI API: {e}")
+            logger.error(f"Error calling Gemini API: {e}")
             raise MarketDataError("E005", str(e)) from e
 
     def generate_market_commentary(self):
@@ -933,16 +904,7 @@ class MarketDataFetcher:
         重要：出力は有効なJSONである必要があります。"""
 
         try:
-            messages = [
-                {"role": "system", "content": "You are a helpful assistant designed to output JSON. Your response must be valid JSON."},
-                {"role": "user", "content": prompt}
-            ]
-            response_json = self._call_openai_api(
-
-                messages=messages,
-                max_tokens=500,
-                response_format={"type": "json_object"}
-            )
+            response_json = self._call_gemini_api(prompt)
             self.data['market']['ai_commentary'] = response_json.get('response', 'AI解説の生成に失敗しました。')
         except Exception as e:
             logger.error(f"Failed to generate and parse AI commentary: {e}")
@@ -1018,15 +980,7 @@ class MarketDataFetcher:
         }}
         """
         try:
-            messages = [
-                {"role": "system", "content": "You are a helpful assistant designed to output JSON. Your response must be valid JSON."},
-                {"role": "user", "content": prompt}
-            ]
-            news_data = self._call_openai_api(
-                messages=messages,
-                max_tokens=1024,
-                response_format={"type": "json_object"}
-            )
+            news_data = self._call_gemini_api(prompt)
             if isinstance(news_data, str) or 'error' in news_data:
                  raise MarketDataError("E005", f"AI news analysis failed: {news_data}")
             self.data['news'] = news_data
@@ -1142,16 +1096,7 @@ class MarketDataFetcher:
         prompt = base_prompt_intro + specific_instructions + data_section + json_format_instruction
 
         try:
-            messages = [
-                {"role": "system", "content": "You are a helpful assistant designed to output JSON. Your response must be valid JSON."},
-                {"role": "user", "content": prompt}
-            ]
-            response_json = self._call_openai_api(
-                messages=messages,
-                max_tokens=1000,
-                temperature=0.6,
-                response_format={"type": "json_object"}
-            )
+            response_json = self._call_gemini_api(prompt)
 
             generated_text = response_json.get('response', 'AIコラムの生成に失敗しました。')
 
@@ -1274,15 +1219,7 @@ class MarketDataFetcher:
 
                     重要：出力は有効なJSONである必要があります。
                     """
-                messages = [
-                    {"role": "system", "content": "You are a helpful assistant designed to output JSON. Your response must be valid JSON."},
-                    {"role": "user", "content": prompt}
-                ]
-                response_json = self._call_openai_api(
-                    messages=messages,
-                    max_tokens=700,
-                    response_format={"type": "json_object"}
-                )
+                response_json = self._call_gemini_api(prompt)
                 commentary = response_json.get('response', 'AI解説の生成に失敗しました。')
                 # Assign commentary to the existing dictionary to avoid overwriting other keys
                 if f'{index_base_name}_heatmap' not in self.data:
@@ -1368,11 +1305,7 @@ class MarketDataFetcher:
                 """
                 max_tokens = 600
 
-            messages = [
-                {"role": "system", "content": "You are a helpful assistant designed to output JSON."},
-                {"role": "user", "content": prompt}
-            ]
-            response_json = self._call_openai_api(messages=messages, max_tokens=max_tokens, response_format={"type": "json_object"})
+            response_json = self._call_gemini_api(prompt)
             self.data['indicators']['economic_commentary'] = response_json.get('response', 'AI解説の生成に失敗しました。')
 
         except Exception as e:
@@ -1438,11 +1371,7 @@ class MarketDataFetcher:
                     """
                     max_tokens = 600
 
-                messages = [
-                    {"role": "system", "content": "You are a helpful assistant designed to output JSON."},
-                    {"role": "user", "content": prompt}
-                ]
-                response_json = self._call_openai_api(messages=messages, max_tokens=max_tokens, response_format={"type": "json_object"})
+                response_json = self._call_gemini_api(prompt)
                 self.data['indicators']['earnings_commentary'] = response_json.get('response', 'AI解説の生成に失敗しました。')
 
         except Exception as e:

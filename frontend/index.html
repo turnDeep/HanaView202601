@@ -47,6 +47,7 @@
             <button class="tab-button" data-tab="indicators">指標</button>
             <button class="tab-button" data-tab="column">コラム</button>
             <button class="tab-button" data-tab="hwb200">200MA</button>
+            <button class="tab-button" data-tab="algo">Algo</button>
         </div>
 
         <main id="dashboard-content">
@@ -88,6 +89,31 @@
                         <p>データがありません。</p>
                     </div>
                 </div>
+            </div>
+
+            <!-- Algoタブコンテンツ -->
+            <div id="algo-content" class="tab-pane">
+              <!-- 検索バー -->
+              <div class="algo-controls">
+                <input type="text" id="algo-ticker-input" placeholder="ティッカー検索..." class="ticker-input">
+                <button id="algo-analyze-btn" class="analyze-btn">検索</button>
+              </div>
+
+              <!-- ステータス表示 -->
+              <div id="algo-status" class="algo-status-info"></div>
+
+              <!-- スクリーナーボタン -->
+              <div id="algo-screener-buttons" class="screener-buttons">
+                <button class="screener-btn active" data-screener="momentum_97">Momentum 97</button>
+                <button class="screener-btn" data-screener="explosive_eps">Explosive EPS</button>
+                <button class="screener-btn" data-screener="up_on_volume">Up on Volume</button>
+                <button class="screener-btn" data-screener="top_2pct_rs">Top 2% RS</button>
+                <button class="screener-btn" data-screener="bullish_4pct">4% Bullish</button>
+                <button class="screener-btn" data-screener="healthy_chart">Healthy Chart</button>
+              </div>
+
+              <!-- コンテンツエリア -->
+              <div id="algo-content-area"></div>
             </div>
         </main>
     </div>
