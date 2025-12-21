@@ -1,21 +1,40 @@
-fastapi==0.104.1
-uvicorn==0.24.0
-yfinance>=0.2.65
-curl-cffi>=0.13.0
-beautifulsoup4==4.12.2
-openai==1.107.1
-pandas==2.1.4
-Pillow==10.1.0
+# Web Framework
+fastapi>=0.124.0
+uvicorn>=0.39.0
+
+# Data Fetching & Processing
+yfinance>=0.2.66
+pandas>=2.3.3
+numpy>=2.4.0
+
+# Web Scraping
+curl-cffi>=0.14.0
+beautifulsoup4>=4.14.3
+lxml>=6.0.2
+httpx>=0.28.1
+
+# AI & Analysis (Gemini API)
+google-genai>=0.8.3
+# Note: google-generativeai is deprecated, using google-genai instead
+
+# Financial Analysis
+QuantLib>=1.40
+scipy>=1.17.0
+
+# Visualization
+matplotlib>=3.10.8
+plotly>=6.5.0
+mplfinance>=0.12.10b0
+Pillow>=12.0.0
+
+# Authentication & Security
+python-jose[cryptography]>=3.5.0
+cryptography>=46.0.3
+pywebpush>=2.1.2
+
+# Utilities
+python-dotenv>=1.2.1
+pytz>=2024.1
 platformdirs>=2.0.0
 protobuf>=3.19.0
 websockets>=13.0
-python-dotenv==0.21.0
-lxml==6.0.1
-matplotlib==3.8.0
-pytz==2024.1
-httpx==0.25.2
-python-jose[cryptography]==3.3.0
-pywebpush==2.0.1
-cryptography==46.0.1
-mplfinance>=0.12.10b0
-plotly==5.20.0
