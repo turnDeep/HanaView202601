@@ -19,6 +19,9 @@ from .hwb_data_manager import HWBDataManager
 
 # 既存のインポートに追加
 from .hwb_scanner import run_hwb_scan, analyze_single_ticker
+# Algoスキャン関連のインポート
+from .algo_scanner import run_algo_scan, analyze_single_ticker_algo
+from .algo_data_manager import AlgoDataManager
 import asyncio
 
 # Setup logging
@@ -475,6 +478,144 @@ def debug_subscriptions(current_user: str = Depends(get_current_user)):
             for sub_id, data in subs.items()
         }
     }
+
+# --- Algo Tab Endpoints ---
+
+@app.post("/api/algo/scan")
+async def trigger_algo_scan(payload: dict = Depends(get_current_user_payload)):
+    """Algoスキャンを手動実行（ura権限のみ）"""
+    if payload.get("permission") != "ura":
+        raise HTTPException(status_code=403, detail="Access forbidden: ura permission required")
+
+    try:
+        result = await run_algo_scan()
+
+        # ura権限ユーザーに通知
+        await _send_notifications_to_permission_level(
+            "ura",
+            "Algoスキャン完了",
+            f"新規シグナル: {result['total_scanned']}件"
+        )
+
+        return {
+            "success": True,
+            "message": f"スキャン完了: {result['total_scanned']}件のシグナル検出",
+            "scan_date": result['scan_date'],
+            "scan_time": result['scan_time']
+        }
+
+    except Exception as e:
+        logger.error(f"Algo scan error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"スキャンエラー: {str(e)}")
+
+
+@app.get("/api/algo/daily/latest")
+def get_algo_latest_summary(payload: dict = Depends(get_current_user_payload)):
+    """Algoサマリー取得（ura権限のみ）"""
+    if payload.get("permission") != "ura":
+        raise HTTPException(status_code=403, detail="Access forbidden: ura permission required")
+
+    try:
+        data_manager = AlgoDataManager()
+        summary = data_manager.load_latest_summary()
+
+        if not summary:
+            raise HTTPException(status_code=404, detail="Latest summary not found")
+
+        return summary
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error loading Algo summary: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not retrieve Algo summary")
+
+
+@app.get("/api/algo/symbols/{symbol}")
+def get_algo_symbol_data(symbol: str, payload: dict = Depends(get_current_user_payload)):
+    """個別銘柄データ取得（ura権限のみ）"""
+    if payload.get("permission") != "ura":
+        raise HTTPException(status_code=403, detail="Access forbidden: ura permission required")
+
+    try:
+        # Basic validation
+        if not re.match(r'^[A-Z0-9\-\.]+$', symbol.upper()):
+            raise HTTPException(status_code=400, detail="Invalid symbol format")
+
+        data_manager = AlgoDataManager()
+        symbol_data = data_manager.load_symbol_data(symbol.upper())
+
+        if not symbol_data:
+            raise HTTPException(status_code=404, detail=f"Data for symbol '{symbol}' not found")
+
+        return symbol_data
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error loading symbol data for {symbol}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Could not retrieve data for symbol '{symbol}'")
+
+
+@app.get("/api/algo/analyze_ticker")
+async def analyze_ticker_algo(ticker: str, force: bool = False, payload: dict = Depends(get_current_user_payload)):
+    """銘柄分析（ura権限のみ）"""
+    if payload.get("permission") != "ura":
+        raise HTTPException(status_code=403, detail="Access forbidden: ura permission required")
+
+    if not ticker:
+        raise HTTPException(status_code=400, detail="Ticker symbol is required")
+
+    try:
+        symbol = ticker.strip().upper()
+        data_manager = AlgoDataManager()
+
+        if not force:
+            # キャッシュデータを返す
+            logger.info(f"Attempting to load cached data for {symbol}...")
+            existing_data = data_manager.load_symbol_data(symbol)
+
+            if existing_data:
+                logger.info(f"Returning cached data for {symbol}")
+                return existing_data
+            else:
+                logger.info(f"No cached data found for {symbol}")
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"分析データが見つかりません。新規に分析しますか？"
+                )
+
+        # force=true の場合、新規分析を実行
+        logger.info(f"Force analyzing {symbol}...")
+        analysis_result = await analyze_single_ticker_algo(symbol)
+
+        if not analysis_result:
+            raise HTTPException(
+                status_code=404,
+                detail=f"{symbol}の分析に失敗しました"
+            )
+
+        # スクリーナーに含まれていないため、Gemini解説なし
+        symbol_data = {
+            'symbol': symbol,
+            **analysis_result,
+            'gemini_analysis': None,
+            'screener_sources': [],
+            'metadata': {},
+            'message': 'この銘柄はスクリーナーに含まれていません。チャート分析のみ表示します。',
+            'last_updated': datetime.now(timezone.utc).isoformat()
+        }
+
+        # キャッシュに保存
+        data_manager.save_symbol_data(symbol, symbol_data)
+
+        return symbol_data
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error analyzing ticker {ticker}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"分析中に予期せぬエラーが発生しました")
 
 # Mount the frontend directory to serve static files
 # This must come AFTER all API routes
