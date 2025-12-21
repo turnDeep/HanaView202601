@@ -274,8 +274,7 @@ RUN chmod +x /app/backend/cron_job_algo.sh
 
 **重要**: OpenAI APIからGemini APIに全面移行
 
-- **使用モデル**: `gemini-2.0-flash-exp` (2025年12月時点の最新モデル)
-  - ※ `gemini-3-flash-preview` は存在しないため、実在する最新モデルを使用
+- **使用モデル**: `gemini-3-flash-preview` (2025年12月時点の最新モデル)
 - **API呼び出し**: `google-genai` ライブラリを使用（`google-generativeai`は非推奨）
 - **既存のOpenAI API呼び出しをすべてGemini APIに置き換える**
 
@@ -1483,7 +1482,7 @@ class GeminiClient:
             raise ValueError("GEMINI_API_KEY environment variable is not set")
 
         self.client = genai.Client(api_key=self.api_key)
-        self.model = 'gemini-2.0-flash-exp'
+        self.model = 'gemini-3-flash-preview'
 
     def generate_content(self, prompt: str, max_retries: int = 3) -> Optional[str]:
         """
@@ -1693,20 +1692,26 @@ class AlgoScanner:
                         regime = analysis_result.get('volatility_regime', 'transition')
                         volatility_distribution[regime] += 1
 
-                        # Gemini解説を生成
-                        gemini_analysis = await self.generate_gemini_analysis(ticker, analysis_result)
-
-                        # 個別銘柄データを保存
-                        self.data_manager.save_symbol_data(ticker, {
-                            **merged_data,
-                            'gemini_analysis': gemini_analysis,
-                            'screener_sources': [screener_key],
-                            'last_updated': datetime.now().isoformat()
-                        })
-
                 except Exception as e:
                     logger.error(f"Error analyzing {ticker}: {e}")
                     continue
+
+            # バッチでGemini解説を生成
+            if analyzed_symbols:
+                gemini_results = await self.generate_batch_gemini_analysis(screener_key, analyzed_symbols)
+
+                # 結果を統合して保存
+                for symbol_data in analyzed_symbols:
+                    ticker = symbol_data['ticker']
+                    gemini_analysis = gemini_results.get(ticker)
+
+                    # 個別銘柄データを保存
+                    self.data_manager.save_symbol_data(ticker, {
+                        **symbol_data,
+                        'gemini_analysis': gemini_analysis,
+                        'screener_sources': [screener_key],
+                        'last_updated': datetime.now().isoformat()
+                    })
 
             summary[screener_key] = analyzed_symbols
 
@@ -1855,35 +1860,48 @@ class AlgoScanner:
             logger.error(f"Error running quantlib_timeseries_analyzer for {ticker}: {e}")
             return {}
 
-    async def generate_gemini_analysis(self, ticker: str, analysis_data: Dict) -> str:
-        """Gemini APIで解説を生成"""
+    async def generate_batch_gemini_analysis(self, screener_key: str, symbols_data: List[Dict]) -> Dict[str, str]:
+        """Gemini APIで一括解説生成"""
         try:
-            ai_strategy = analysis_data.get('analysis_data', {}).get('ai_strategy', {})
+            # プロンプト用のデータを構築
+            prompt_data = []
+            for item in symbols_data:
+                prompt_data.append({
+                    "ticker": item['ticker'],
+                    "gamma_flip": item.get('gamma_flip'),
+                    "volatility_regime": item.get('volatility_regime'),
+                    "expected_move_30d": item.get('expected_move_30d'),
+                    "ai_strategy": item.get('analysis_data', {}).get('ai_strategy', {})
+                })
 
             prompt = f"""
-以下のガンマ分析とボラティリティ分析に基づいて、{ticker}のトレーディング戦略を日本語で簡潔に説明してください:
+あなたはプロの株式トレーダーです。以下の銘柄リスト（スクリーナー: {screener_key}）について、各銘柄の分析とトレーディング戦略を日本語で作成してください。
 
-【ガンマレベル】
-- Zero Gamma Flip: {analysis_data.get('gamma_flip', 'N/A')}
+【入力データ】
+{json.dumps(prompt_data, ensure_ascii=False, indent=2)}
 
-【ボラティリティ】
-- 現在のレジーム: {analysis_data.get('volatility_regime', 'N/A')}
-- 30日間期待移動率: {analysis_data.get('expected_move_30d', 'N/A')}%
-
-【AI戦略情報】
-{json.dumps(ai_strategy, ensure_ascii=False, indent=2)}
-
-トレーダーが実際に使える具体的なエントリー/エグジットレベルと、リスク管理のポイントを含めてください。
-400文字以内で簡潔にまとめてください。
+【要件】
+1. 各銘柄について、ガンマ分析とボラティリティ分析に基づいた具体的な戦略を記述すること。
+2. エントリー/エグジットレベルとリスク管理のポイントを含めること。
+3. 出力は**必ず以下のJSON形式**のみとすること。Markdownのコードブロックなどは含めないこと。
+{{
+  "TICKER": "解説テキスト（400文字以内）",
+  ...
+}}
 """
 
-            analysis_text = gemini_client.generate_content(prompt)
+            response_text = gemini_client.generate_content(prompt)
 
-            return analysis_text if analysis_text else "解説の生成に失敗しました。"
+            if not response_text:
+                return {}
+
+            # JSONパース（Markdownのバッククォートが含まれている場合の除去処理）
+            clean_text = response_text.replace('```json', '').replace('```', '').strip()
+            return json.loads(clean_text)
 
         except Exception as e:
-            logger.error(f"Error generating Gemini analysis for {ticker}: {e}")
-            return "解説の生成中にエラーが発生しました。"
+            logger.error(f"Error generating batch Gemini analysis: {e}")
+            return {}
 
 # グローバルインスタンス
 algo_scanner = AlgoScanner()
