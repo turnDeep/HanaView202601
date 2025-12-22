@@ -22,7 +22,7 @@ class GeminiClient:
         else:
             self.client = None
 
-        self.model = 'gemini-3-flash-preview'
+        self.model = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
 
     def generate_content(self, prompt: str, max_retries: int = 3) -> Optional[str]:
         """
