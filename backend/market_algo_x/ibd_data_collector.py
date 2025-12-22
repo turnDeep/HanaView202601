@@ -572,21 +572,264 @@ class IBDDataCollector:
 
         return success_count
 
+    # ==================== SMR要素の計算と保存 ====================
+
+    def calculate_and_store_smr_components(self, tickers_list: List[str] = None):
+        """全銘柄のSMR要素を計算してDBに保存"""
+        if tickers_list is None:
+            tickers_list = self.db.get_all_tickers()
+
+        print(f"\n全銘柄のSMR要素を計算中（{len(tickers_list)} 銘柄）...")
+
+        success_count = 0
+        for idx, ticker in enumerate(tickers_list):
+            if (idx + 1) % 500 == 0:
+                print(f"  進捗: {idx + 1}/{len(tickers_list)} 銘柄")
+
+            try:
+                income_q = self.db.get_income_statements_quarterly(ticker, limit=8)
+                income_a = self.db.get_income_statements_annual(ticker, limit=5)
+                balance_a = self.db.get_balance_sheet_annual(ticker, limit=5)
+
+                # 少なくとも最近のデータが必要
+                if not income_q or len(income_q) < 4:
+                    continue
+
+                smr_components = self.calculate_smr_components(income_q, income_a, balance_a)
+                if smr_components:
+                    self.db.insert_calculated_smr(
+                        ticker,
+                        smr_components.get('sales_growth_q1'),
+                        smr_components.get('sales_growth_q2'),
+                        smr_components.get('sales_growth_q3'),
+                        smr_components.get('avg_sales_growth_3q'),
+                        smr_components.get('pretax_margin_annual'),
+                        smr_components.get('aftertax_margin_quarterly'),
+                        smr_components.get('roe_annual')
+                    )
+                    success_count += 1
+            except Exception:
+                continue
+
+        print(f"  {success_count} 銘柄のSMR要素を計算しました\n")
+
+    def calculate_smr_components(self, income_q: List[Dict], income_a: List[Dict], balance_a: List[Dict]) -> Optional[Dict]:
+        """SMR要素を計算"""
+        try:
+            result = {}
+
+            # 1. 売上高成長率 (Sales Growth)
+            sales_q0 = income_q[0].get('revenue')
+            sales_q0_yoy = income_q[4].get('revenue') if len(income_q) > 4 else None
+
+            if sales_q0 and sales_q0_yoy:
+                result['sales_growth_q1'] = ((sales_q0 - sales_q0_yoy) / abs(sales_q0_yoy)) * 100
+            else:
+                result['sales_growth_q1'] = None
+
+            if len(income_q) >= 6:
+                sales_q1 = income_q[1].get('revenue')
+                sales_q1_yoy = income_q[5].get('revenue')
+                if sales_q1 and sales_q1_yoy:
+                    result['sales_growth_q2'] = ((sales_q1 - sales_q1_yoy) / abs(sales_q1_yoy)) * 100
+                else:
+                    result['sales_growth_q2'] = None
+            else:
+                result['sales_growth_q2'] = None
+
+            if len(income_q) >= 7:
+                sales_q2 = income_q[2].get('revenue')
+                sales_q2_yoy = income_q[6].get('revenue')
+                if sales_q2 and sales_q2_yoy:
+                    result['sales_growth_q3'] = ((sales_q2 - sales_q2_yoy) / abs(sales_q2_yoy)) * 100
+                else:
+                    result['sales_growth_q3'] = None
+            else:
+                result['sales_growth_q3'] = None
+
+            sales_growths = [g for g in [result.get('sales_growth_q1'), result.get('sales_growth_q2'), result.get('sales_growth_q3')] if g is not None]
+            result['avg_sales_growth_3q'] = np.mean(sales_growths) if sales_growths else None
+
+            # 2. 税引前利益率 (Pre-tax Margin) - Proxy using Net Margin
+            if income_a and len(income_a) > 0:
+                rev = income_a[0].get('revenue')
+                net = income_a[0].get('net_income')
+                if rev and net and rev != 0:
+                    result['pretax_margin_annual'] = (net / rev) * 100
+                else:
+                    result['pretax_margin_annual'] = None
+            else:
+                result['pretax_margin_annual'] = None
+
+            # 3. 税引後利益率 (After-tax Margin)
+            if income_q and len(income_q) > 0:
+                rev = income_q[0].get('revenue')
+                net = income_q[0].get('net_income')
+                if rev and net and rev != 0:
+                    result['aftertax_margin_quarterly'] = (net / rev) * 100
+                else:
+                    result['aftertax_margin_quarterly'] = None
+            else:
+                result['aftertax_margin_quarterly'] = None
+
+            # 4. ROE
+            if balance_a and len(balance_a) > 0 and income_a and len(income_a) > 0:
+                 equity = balance_a[0].get('total_stockholders_equity') or balance_a[0].get('total_equity')
+                 net_income = income_a[0].get('net_income')
+                 if equity and net_income and equity != 0:
+                     result['roe_annual'] = (net_income / equity) * 100
+                 else:
+                     result['roe_annual'] = None
+            else:
+                 result['roe_annual'] = None
+
+            return result
+        except:
+            return None
+
+    # ==================== レーティング計算と保存 ====================
+
+    def calculate_and_store_ratings(self):
+        """全銘柄の最終レーティングを計算してDBに保存"""
+        print(f"\n全銘柄のレーティングを計算中...")
+
+        rs_values = self.db.get_all_rs_values()
+        eps_components = self.db.get_all_eps_components()
+        smr_components = self.db.get_all_smr_components()
+        tickers = self.db.get_all_tickers()
+
+        # --- RS Rating ---
+        sorted_rs = sorted([(k, v) for k, v in rs_values.items() if v is not None], key=lambda x: x[1])
+        rs_ranks = {}
+        n_rs = len(sorted_rs)
+        if n_rs > 0:
+            for i, (t, v) in enumerate(sorted_rs):
+                rs_ranks[t] = int(1 + (i / n_rs) * 98)
+
+        # --- EPS Rating ---
+        eps_scores = []
+        for t, comps in eps_components.items():
+            g1 = min(comps.get('eps_growth_last_qtr') or 0, 500)
+            g2 = min(comps.get('eps_growth_prev_qtr') or 0, 500)
+            g3 = min(comps.get('annual_growth_rate') or 0, 100)
+            score = (g1 * 0.4) + (g2 * 0.2) + (g3 * 0.2) + ((comps.get('stability_score') or 0) * 0.2)
+            eps_scores.append((t, score))
+
+        sorted_eps = sorted(eps_scores, key=lambda x: x[1])
+        eps_ranks = {}
+        n_eps = len(sorted_eps)
+        if n_eps > 0:
+            for i, (t, v) in enumerate(sorted_eps):
+                eps_ranks[t] = int(1 + (i / n_eps) * 98)
+
+        # --- SMR Rating ---
+        smr_scores = []
+        for t, comps in smr_components.items():
+            score = 0
+            score += (comps.get('avg_sales_growth_3q') or 0) * 0.4
+            score += (comps.get('pretax_margin_annual') or 0) * 0.3
+            score += (comps.get('roe_annual') or 0) * 0.3
+            smr_scores.append((t, score))
+
+        sorted_smr = sorted(smr_scores, key=lambda x: x[1])
+        smr_ratings = {}
+        n_smr = len(sorted_smr)
+        if n_smr > 0:
+            for i, (t, v) in enumerate(sorted_smr):
+                p = (i / n_smr) * 100
+                if p >= 80: r = 'A'
+                elif p >= 60: r = 'B'
+                elif p >= 40: r = 'C'
+                elif p >= 20: r = 'D'
+                else: r = 'E'
+                smr_ratings[t] = r
+
+        # --- 保存とComposite Rating ---
+        count = 0
+        letter_to_score = {'A': 95, 'B': 80, 'C': 60, 'D': 40, 'E': 20}
+
+        for ticker in tickers:
+            rs_rank = rs_ranks.get(ticker, 0)
+            eps_rank = eps_ranks.get(ticker, 0)
+            smr_r = smr_ratings.get(ticker, 'C')
+
+            # A/D Rating (簡易ロジック: RSが高いほど良いとする仮定)
+            if rs_rank >= 90: ad_rating = 'A'
+            elif rs_rank >= 70: ad_rating = 'B'
+            elif rs_rank >= 50: ad_rating = 'C'
+            elif rs_rank >= 30: ad_rating = 'D'
+            else: ad_rating = 'E'
+
+            smr_score = letter_to_score.get(smr_r, 60)
+            ad_score = letter_to_score.get(ad_rating, 60)
+
+            comp_score = (rs_rank * 2 + eps_rank * 2 + smr_score + ad_score) / 6
+            comp_rating = int(comp_score)
+
+            self.db.insert_calculated_rating(
+                ticker,
+                rs_rating=rs_rank,
+                eps_rating=eps_rank,
+                ad_rating=ad_rating,
+                smr_rating=smr_r,
+                comp_rating=comp_rating,
+                price_vs_52w_high=0, # 後で更新
+                industry_group_rs=0
+            )
+            count += 1
+
+        # 52週高値を更新
+        self.update_price_vs_52w_high_bulk()
+
+        print(f"  {count} 銘柄のレーティングを計算しました")
+
+    def update_price_vs_52w_high_bulk(self):
+        """52週高値との乖離を一括計算"""
+        query = '''
+            SELECT ticker, MAX(high) as year_high,
+                   (SELECT close FROM price_history ph2 WHERE ph2.ticker = ph1.ticker ORDER BY date DESC LIMIT 1) as current_close
+            FROM price_history ph1
+            WHERE date >= date('now', '-365 days')
+            GROUP BY ticker
+        '''
+        try:
+            cursor = self.db.conn.cursor()
+            cursor.execute(query)
+            rows = cursor.fetchall()
+
+            updates = []
+            for row in rows:
+                ticker = row[0]
+                high = row[1]
+                close = row[2]
+
+                if high and close and high > 0:
+                    pct_off = ((close - high) / high) * 100
+                    updates.append((pct_off, ticker))
+
+            if updates:
+                cursor.executemany('UPDATE calculated_ratings SET price_vs_52w_high = ? WHERE ticker = ?', updates)
+                self.db.conn.commit()
+        except Exception as e:
+            print(f"Error calculating 52w highs: {e}")
+
     # ==================== メインワークフロー ====================
 
     def run_full_collection(self, use_full_dataset: bool = True, max_workers: int = 3):
         """
         完全なデータ収集ワークフローを実行
 
-        1. ベンチマークデータ収集（SPY、QQQなど）
+        1. ベンチマークデータ収集
         2. ティッカーリスト取得
-        3. 全データ収集（株価、EPS、プロファイル）
+        3. 全データ収集
         4. RS値計算
         5. EPS要素計算
+        6. SMR要素計算
+        7. レーティング計算
 
         Args:
-            use_full_dataset: 全銘柄を処理するか（Falseの場合は500銘柄に制限）
-            max_workers: 並列処理のワーカー数（デフォルト3: 750 calls/min制限に対応）
+            use_full_dataset: 全銘柄を処理するか
+            max_workers: 並列処理のワーカー数
         """
         # 1. ベンチマークデータ収集（最優先）
         self.collect_benchmark_data()
@@ -616,7 +859,13 @@ class IBDDataCollector:
         # 6. EPS要素計算
         self.calculate_and_store_eps_components(collected_tickers)
 
-        # 7. 統計表示
+        # 7. SMR要素計算
+        self.calculate_and_store_smr_components(collected_tickers)
+
+        # 8. レーティング計算
+        self.calculate_and_store_ratings()
+
+        # 9. 統計表示
         self.db.get_database_stats()
 
         print(f"\n{'='*80}")
