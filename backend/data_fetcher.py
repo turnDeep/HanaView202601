@@ -12,7 +12,6 @@ import pandas as pd
 import yfinance as yf
 from bs4 import BeautifulSoup
 from curl_cffi.requests import Session
-import openai
 import httpx
 from io import StringIO
 from urllib.parse import urlparse
@@ -105,7 +104,7 @@ class MarketDataError(Exception):
         super().__init__(f"[{self.code}] {self.message}")
 
 ERROR_CODES = {
-    "E001": "OpenAI API key is not configured.",
+    "E001": "Gemini API key is not configured.",
     "E002": "Data file could not be read.",
     "E003": "Failed to connect to an external API.",
     "E004": "Failed to fetch Fear & Greed Index data.",
@@ -142,10 +141,6 @@ class MarketDataFetcher:
         # yfinance用のセッションも別途作成
         self.yf_session = Session(impersonate="safari15_5")
         self.data = {"market": {}, "news": [], "indicators": {"economic": [], "us_earnings": [], "jp_earnings": []}}
-
-        # Use Gemini Client instead of OpenAI
-        self.openai_client = None # Deprecated
-        self.openai_model = None # Deprecated
 
     def _clean_non_compliant_floats(self, obj):
         if isinstance(obj, dict):

@@ -19,7 +19,7 @@ google-genai>=0.8.3
 
 # Financial Analysis
 QuantLib>=1.40
-scipy>=1.17.0
+scipy>=1.16.0
 
 # Visualization
 matplotlib>=3.10.8
