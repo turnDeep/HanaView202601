@@ -317,16 +317,20 @@ document.addEventListener('DOMContentLoaded', () => {
     function applyTabPermissions() {
         const permission = AuthManager.getPermission();
         const hwb200Tab = document.querySelector('.tab-button[data-tab="hwb200"]');
+        const algoTab = document.querySelector('.tab-button[data-tab="algo"]');
 
         console.log(`Applying permissions for level: ${permission}`);
 
         if (hwb200Tab) hwb200Tab.style.display = '';
+        if (algoTab) algoTab.style.display = '';
 
         if (permission === 'standard') {
-            console.log("Standard permission: Hiding 200MA and Stage1+2 tabs.");
+            console.log("Standard permission: Hiding 200MA and Algo tabs.");
             if (hwb200Tab) hwb200Tab.style.display = 'none';
+            if (algoTab) algoTab.style.display = 'none';
         } else if (permission === 'secret') {
-            console.log("Secret permission: Hiding Stage1+2 tab.");
+            console.log("Secret permission: Hiding Algo tab.");
+            if (algoTab) algoTab.style.display = 'none';
         } else if (permission === 'ura') {
             console.log("Ura permission: All tabs visible.");
         }
@@ -1223,4 +1227,453 @@ getVolumeClass(volumeIncreasePct) {
     // --- App Initialization ---
     initializeApp();
     setupAutoReload();
+});
+
+// ==========================================
+// Algo Manager Implementation
+// ==========================================
+class AlgoManager {
+    constructor() {
+        this.summaryData = null;
+        this.currentView = 'summary';
+        this.activeScreener = 'momentum_97'; // Default screener
+        this.initEventListeners();
+    }
+
+    initEventListeners() {
+        // Screener button events
+        const screenerButtons = document.querySelectorAll('.screener-btn');
+        screenerButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.activeScreener = btn.dataset.screener;
+                this.switchScreener(btn.dataset.screener);
+            });
+        });
+
+        // Search button events
+        const searchBtn = document.getElementById('algo-analyze-btn');
+        if (searchBtn) {
+            searchBtn.addEventListener('click', () => {
+                if (searchBtn.dataset.state === 'reset') {
+                    this.resetToSummary();
+                } else {
+                    this.searchTicker();
+                }
+            });
+        }
+    }
+
+    async loadData() {
+        this.showStatus('最新のAlgoデータを読み込み中...', 'info');
+
+        try {
+            const response = await fetchWithAuth('/api/algo/daily/latest');
+
+            if (!response.ok) {
+                if (response.status === 404) {
+                    this.showStatus('データがありません。スキャンを実行してください。', 'warning');
+                    document.getElementById('algo-content-area').innerHTML = '<div class="card"><p>データがありません。スキャンを実行してください。</p></div>';
+                    return;
+                }
+                throw new Error(`サーバーエラー: ${response.status}`);
+            }
+
+            this.summaryData = await response.json();
+            this.currentView = 'summary';
+            this.render();
+
+            const { updated_at, volatility_distribution } = this.summaryData;
+            const displayDate = this.formatDate(updated_at);
+
+            this.showStatus(
+                `最終更新: ${displayDate} | 🟢: ${volatility_distribution.contraction} | 🟡: ${volatility_distribution.transition} | 🔴: ${volatility_distribution.expansion}`,
+                'info'
+            );
+
+        } catch (error) {
+            console.error('Algo data loading error:', error);
+            this.showStatus(`❌ データ読み込みエラー: ${error.message}`, 'error');
+        }
+    }
+
+    switchScreener(screenerKey) {
+        // Update active button state
+        document.querySelectorAll('.screener-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.screener === screenerKey);
+        });
+
+        this.activeScreener = screenerKey;
+        this.render();
+    }
+
+    render() {
+        if (!this.summaryData) return;
+
+        const container = document.getElementById('algo-content-area');
+        container.innerHTML = '';
+
+        this.renderSummaryStats(container);
+        this.renderSymbolList(container);
+    }
+
+    renderSummaryStats(container) {
+        const { summary, volatility_distribution } = this.summaryData;
+        const screenerData = summary[this.activeScreener] || [];
+
+        // 200MA style summary layout
+        const summaryDiv = document.createElement('div');
+        summaryDiv.className = 'algo-summary-container';
+
+        summaryDiv.innerHTML = `
+            <h2>${this.getScreenerDisplayName(this.activeScreener)}</h2>
+            <div class="hwb-summary-grid">
+                <div class="summary-card green">
+                    <h3>凪 (Low Vol)</h3>
+                    <p class="summary-count">${screenerData.filter(s => s.volatility_regime === 'contraction').length}</p>
+                </div>
+                <div class="summary-card yellow">
+                    <h3>通常 (Normal)</h3>
+                    <p class="summary-count">${screenerData.filter(s => s.volatility_regime === 'transition').length}</p>
+                </div>
+                <div class="summary-card red">
+                    <h3>嵐 (High Vol)</h3>
+                    <p class="summary-count">${screenerData.filter(s => s.volatility_regime === 'expansion').length}</p>
+                </div>
+            </div>
+        `;
+
+        container.appendChild(summaryDiv);
+    }
+
+    renderSymbolList(container) {
+        const { summary } = this.summaryData;
+        const screenerData = summary[this.activeScreener] || [];
+
+        if (screenerData.length === 0) {
+            container.innerHTML += '<p class="no-data">このスクリーナーには該当銘柄がありません。</p>';
+            return;
+        }
+
+        // Sort by volatility regime: contraction (green) -> transition (yellow) -> expansion (red)
+        const sortOrder = { 'contraction': 0, 'transition': 1, 'expansion': 2 };
+        const sortedData = [...screenerData].sort((a, b) => {
+            return sortOrder[a.volatility_regime] - sortOrder[b.volatility_regime];
+        });
+
+        // Reuse HWB list styles for consistency
+        const listDiv = document.createElement('div');
+        listDiv.className = 'algo-symbol-list hwb-symbol-list';
+        // Note: hwb-symbol-list is grid-template-columns: repeat(2, 1fr) by default in CSS for hwb tab.
+        // We might want to use the same or define new class.
+        // Let's use a wrapper section like HWB does.
+
+        const section = document.createElement('div');
+        section.className = 'hwb-symbol-section';
+        section.innerHTML = `<h3>該当銘柄一覧 (${screenerData.length})</h3>`;
+        section.appendChild(listDiv);
+
+        sortedData.forEach(item => {
+            const symbolItem = this.createSymbolItem(item);
+            listDiv.appendChild(symbolItem);
+        });
+
+        container.appendChild(section);
+    }
+
+    createSymbolItem(item) {
+        const itemDiv = document.createElement('div');
+        itemDiv.className = 'hwb-symbol-item algo-symbol-item';
+        // hwb-symbol-item styles give card look.
+
+        const regimeClass = `regime-${item.volatility_regime}`;
+        const regimeLabel = this.getRegimeLabel(item.volatility_regime);
+
+        // Chart URL - assuming gamma plot is available or we use generic chart
+        // The spec says: {ticker}_gamma_analysis.png
+        const chartUrl = `/charts/algo/${item.symbol}_gamma_analysis.png?v=${new Date().getTime()}`;
+
+        itemDiv.innerHTML = `
+            <div class="hwb-symbol-header" style="width: 100%;">
+                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                    <span class="hwb-symbol-name">${item.symbol}</span>
+                    <span class="regime-badge ${regimeClass}">${regimeLabel}</span>
+                 </div>
+                 <div class="symbol-meta" style="display: flex; flex-wrap: wrap; gap: 5px;">
+                    ${this.renderMetaInfo(item)}
+                 </div>
+            </div>
+            <div class="hwb-symbol-chart" style="width: 100%; margin-top: 10px;">
+                <img src="${chartUrl}" alt="${item.symbol} Analysis" class="algo-chart-img" style="width: 100%; height: auto; border-radius: 4px;" loading="lazy" onerror="this.onerror=null;this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMDAgMjAwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjBmMGYwIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGRvbWluYW50LWJhc2VsaW5lPSJtaWRkbGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5OTkiPk5vIENoYXJ0PC90ZXh0Pjwvc3ZnPg==';">
+            </div>
+        `;
+
+        itemDiv.style.flexDirection = 'column';
+        itemDiv.style.alignItems = 'flex-start';
+
+        // Add double tap listener
+        const img = itemDiv.querySelector('.algo-chart-img');
+        if (img) {
+            this.addDoubleTapListener(img, item.symbol);
+        }
+
+        return itemDiv;
+    }
+
+    renderMetaInfo(item) {
+        let metaHtml = '';
+
+        if (item.rs_rating) {
+            metaHtml += `<span class="hwb-rs-badge ${this.getRSClass(item.rs_rating)}">RS ${item.rs_rating}</span>`;
+        }
+        if (item.expected_move_30d) {
+             metaHtml += `<span class="hwb-volume-badge vol-moderate">Move ±${item.expected_move_30d}%</span>`;
+        }
+
+        return metaHtml;
+    }
+
+    getScreenerDisplayName(screenerKey) {
+        const names = {
+            'momentum_97': 'Momentum 97',
+            'explosive_eps': 'Explosive EPS',
+            'up_on_volume': 'Up on Volume',
+            'top_2pct_rs': 'Top 2% RS',
+            'bullish_4pct': '4% Bullish',
+            'healthy_chart': 'Healthy Chart'
+        };
+        return names[screenerKey] || screenerKey;
+    }
+
+    getRegimeLabel(regime) {
+        const labels = {
+            'contraction': '🟢 凪',
+            'transition': '🟡 通常',
+            'expansion': '🔴 嵐'
+        };
+        return labels[regime] || regime;
+    }
+
+    getRSClass(rs) {
+        if (rs >= 90) return 'rs-excellent';
+        if (rs >= 80) return 'rs-good';
+        return 'rs-average';
+    }
+
+    formatDate(dateStr) {
+        if (!dateStr) return '';
+        try {
+            const date = new Date(dateStr);
+            return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+        } catch (e) { return dateStr; }
+    }
+
+    addDoubleTapListener(element, symbol) {
+        let lastTap = 0;
+        element.addEventListener('touchend', (e) => {
+            const currentTime = new Date().getTime();
+            const tapLength = currentTime - lastTap;
+            if (tapLength < 500 && tapLength > 0) {
+                e.preventDefault();
+                this.showImagePopup(symbol);
+            }
+            lastTap = currentTime;
+        });
+        element.addEventListener('dblclick', () => {
+            this.showImagePopup(symbol);
+        });
+    }
+
+    async showImagePopup(symbol) {
+        try {
+            // Load full symbol data including gemini analysis
+            const response = await fetchWithAuth(`/api/algo/symbols/${symbol}`);
+            const data = await response.json();
+
+            const overlay = document.createElement('div');
+            overlay.className = 'image-popup-overlay algo-popup-overlay';
+
+            // Content container
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'algo-popup-content';
+            contentDiv.style.backgroundColor = 'white';
+            contentDiv.style.padding = '20px';
+            contentDiv.style.borderRadius = '8px';
+            contentDiv.style.maxWidth = '90%';
+            contentDiv.style.maxHeight = '90vh';
+            contentDiv.style.overflowY = 'auto';
+
+            // Image
+            const img = document.createElement('img');
+            img.src = data.analysis_data.gamma_plot;
+            img.className = 'algo-popup-image';
+            img.style.width = '100%';
+            img.style.height = 'auto';
+            img.style.marginBottom = '15px';
+
+            // Analysis text
+            const analysisDiv = document.createElement('div');
+            analysisDiv.className = 'algo-popup-analysis';
+            if (data.gemini_analysis) {
+                 // Check if gemini_analysis is a string or object (spec says string in one place, json in another?)
+                 // Spec says: "gemini_analysis": "..." (string) in response example.
+                 // But batch generation prompt returns JSON map.
+                 // Stored data likely has the string for that ticker.
+                 let text = typeof data.gemini_analysis === 'string' ? data.gemini_analysis : JSON.stringify(data.gemini_analysis);
+
+                 analysisDiv.innerHTML = `
+                    <h3 style="color:#006B6B; border-bottom:1px solid #ddd; padding-bottom:5px;">AI戦略解説 (${symbol})</h3>
+                    <p style="line-height:1.6; color:#333;">${text.replace(/\n/g, '<br>')}</p>
+                 `;
+            } else {
+                 analysisDiv.innerHTML = `<p>解説データはありません。</p>`;
+            }
+
+            contentDiv.appendChild(img);
+            contentDiv.appendChild(analysisDiv);
+            overlay.appendChild(contentDiv);
+
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) document.body.removeChild(overlay);
+            });
+
+            document.body.appendChild(overlay);
+
+        } catch (error) {
+            console.error('Popup error:', error);
+            alert('詳細データの読み込みに失敗しました。');
+        }
+    }
+
+    async searchTicker() {
+        const input = document.getElementById('algo-ticker-input');
+        const ticker = input.value.trim().toUpperCase();
+
+        if (!ticker) {
+            this.showStatus('ティッカーシンボルを入力してください', 'warning');
+            return;
+        }
+
+        this.showStatus(`${ticker}のデータを検索中...`, 'info');
+
+        try {
+            // Check cache first (force=false)
+            const response = await fetchWithAuth(`/api/algo/analyze_ticker?ticker=${ticker}&force=false`);
+
+            if (!response.ok) {
+                if (response.status === 404) {
+                    const shouldAnalyze = confirm(`${ticker}はスクリーナーに含まれていません。\n新規に分析を実行しますか？（30秒ほどかかります）`);
+                    if (shouldAnalyze) {
+                        await this.forceAnalyzeTicker(ticker);
+                    } else {
+                        this.showStatus('検索をキャンセルしました', 'info');
+                    }
+                    return;
+                }
+                throw new Error(`検索に失敗しました: ${response.status}`);
+            }
+
+            const symbolData = await response.json();
+            this.renderSearchResults(ticker, symbolData);
+
+            const searchBtn = document.getElementById('algo-analyze-btn');
+            if (searchBtn) {
+                searchBtn.textContent = 'リセット';
+                searchBtn.dataset.state = 'reset';
+            }
+            this.showStatus(`✅ ${ticker}の検索結果を表示中`, 'info');
+
+        } catch (error) {
+            console.error('Search error:', error);
+            this.showStatus(`❌ エラー: ${error.message}`, 'error');
+        }
+    }
+
+    async forceAnalyzeTicker(ticker) {
+        this.showStatus(`${ticker}を分析中...`, 'info');
+        try {
+            const response = await fetchWithAuth(`/api/algo/analyze_ticker?ticker=${ticker}&force=true`);
+            if (!response.ok) throw new Error(`分析失敗: ${response.status}`);
+
+            const symbolData = await response.json();
+            this.renderSearchResults(ticker, symbolData);
+
+            const searchBtn = document.getElementById('algo-analyze-btn');
+            if (searchBtn) {
+                searchBtn.textContent = 'リセット';
+                searchBtn.dataset.state = 'reset';
+            }
+            this.showStatus(`✅ ${ticker}の分析完了`, 'info');
+        } catch (e) {
+            this.showStatus(`❌ 分析エラー: ${e.message}`, 'error');
+        }
+    }
+
+    renderSearchResults(ticker, symbolData) {
+        const container = document.getElementById('algo-content-area');
+        container.innerHTML = '';
+
+        const resultDiv = document.createElement('div');
+        resultDiv.className = 'algo-search-results';
+        resultDiv.innerHTML = `
+            <h2>${ticker} 分析結果</h2>
+            <div class="hwb-symbol-item algo-symbol-item" style="flex-direction:column; align-items:flex-start;">
+                <div class="hwb-symbol-header" style="width:100%; display:flex; justify-content:space-between;">
+                    <span class="hwb-symbol-name">${ticker}</span>
+                    <span class="regime-badge regime-${symbolData.volatility_regime}">${this.getRegimeLabel(symbolData.volatility_regime)}</span>
+                </div>
+                <div style="width:100%; margin-top:15px;">
+                    <img src="${symbolData.analysis_data.gamma_plot}" style="width:100%; height:auto; border-radius:4px;">
+                </div>
+                <div style="margin-top:20px; background:#f9f9f9; padding:15px; border-radius:8px; width:100%;">
+                    ${symbolData.gemini_analysis ?
+                        `<h3>AI解説</h3><p>${symbolData.gemini_analysis.replace(/\n/g, '<br>')}</p>` :
+                        `<p class="info-message">${symbolData.message || '解説データなし'}</p>`
+                    }
+                </div>
+            </div>
+        `;
+        container.appendChild(resultDiv);
+    }
+
+    resetToSummary() {
+        this.currentView = 'summary';
+        const input = document.getElementById('algo-ticker-input');
+        if (input) input.value = '';
+
+        const searchBtn = document.getElementById('algo-analyze-btn');
+        if (searchBtn) {
+            searchBtn.textContent = '検索';
+            searchBtn.dataset.state = 'search';
+        }
+        this.render();
+    }
+
+    showStatus(message, type = 'info') {
+        const statusDiv = document.getElementById('algo-status');
+        if (statusDiv) {
+            statusDiv.textContent = message;
+            statusDiv.className = `algo-status-info ${type}`;
+        }
+    }
+}
+
+// Initialize Algo Tab
+function initAlgoTab() {
+    window.algoManager = new AlgoManager();
+    console.log('AlgoManager initialized');
+}
+
+// Hook into initialization
+if (document.getElementById('algo-content')) {
+    // We can init immediately if the tab exists
+    initAlgoTab();
+}
+
+// Also hook into tab switching to load data on first view
+document.querySelector('.tab-container').addEventListener('click', (e) => {
+    if (e.target.dataset.tab === 'algo' && window.algoManager) {
+        if (!window.algoManager.summaryData) {
+            window.algoManager.loadData();
+        }
+    }
 });
