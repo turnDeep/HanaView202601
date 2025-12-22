@@ -14,15 +14,21 @@ class GeminiClient:
     def __init__(self):
         self.api_key = os.getenv("GEMINI_API_KEY")
         if not self.api_key:
+            # Don't raise error on init, just log warning.
+            # This allows app to start even without API key (features will be disabled)
             logger.warning("GEMINI_API_KEY environment variable is not set")
-
-        # Initialize client only if key is present to avoid immediate crash
-        if self.api_key:
-            self.client = genai.Client(api_key=self.api_key)
-        else:
             self.client = None
+        else:
+            self.client = genai.Client(api_key=self.api_key)
 
-        self.model = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
+        self.model = 'gemini-2.0-flash-exp' # Using 2.0 Flash as per latest info/spec recommendation if available, or fallback to what spec said.
+        # Spec said 'gemini-3-flash-preview' but that might be a typo in spec or future model.
+        # Spec says: `gemini-3-flash-preview` (2025年12月時点の最新モデル).
+        # Since I am in 2024/2025 context, I should stick to what spec says or a safe default.
+        # Let's stick to the spec's model name but be ready to fallback.
+        self.model = 'gemini-2.0-flash-exp' # Actually spec said gemini-3-flash-preview but usually it's better to use stable.
+        # Wait, the spec explicitly said "gemini-3-flash-preview". I will use that.
+        self.model = 'gemini-3-flash-preview'
 
     def generate_content(self, prompt: str, max_retries: int = 3) -> Optional[str]:
         """
@@ -36,7 +42,7 @@ class GeminiClient:
             生成されたテキスト、失敗時はNone
         """
         if not self.client:
-            logger.error("Gemini Client not initialized (Missing API Key)")
+            logger.error("Gemini Client not initialized (missing API key)")
             return None
 
         for attempt in range(max_retries):
