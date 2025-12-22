@@ -6,7 +6,6 @@ uvicorn>=0.39.0
 yfinance>=0.2.66
 pandas>=2.3.3
 numpy>=2.4.0
-pandas-ta>=0.3.14b
 
 # Web Scraping
 curl-cffi>=0.14.0
@@ -39,6 +38,3 @@ pytz>=2024.1
 platformdirs>=2.0.0
 protobuf>=3.19.0
 websockets>=13.0
-
-# Social
-tweepy>=4.14.0
