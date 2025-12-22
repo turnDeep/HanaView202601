@@ -222,28 +222,34 @@ MarketAlgoXは火曜〜土曜の6時に実行されるため、その2時間後�
      - **Transition** (Normal) → 黄
      - **Expansion** (High Vol) → 赤
 
-4. **Gemini APIで解説生成**
-   - `quantlib_ai_analyzer.py` の出力JSONと画像を元に、Gemini APIで各銘柄の解説を生成
+4. **Gemini APIで解説生成 (バッチ処理)**
+   - APIリクエスト数を削減するため（各スクリーナー1回、計6回）、スクリーナーごとに銘柄をまとめ、1つのJSONとしてGeminiに送信する。
+   - `gemini-3-flash-preview` を使用して一括生成する。
    - プロンプト:
      ```
-     以下のガンマ分析とボラティリティ分析に基づいて、この銘柄のトレーディング戦略を日本語で簡潔に説明してください:
+     あなたはプロの株式トレーダーです。以下の銘柄リスト（スクリーナー: {screener_key}）について、各銘柄の分析とトレーディング戦略を日本語で作成してください。
 
-     【ガンマレベル】
-     - Zero Gamma Flip: {value}
-     - Magnet/Wall: {value}
-     - Acceleration Zone: {value}
+     【入力データ】
+     [
+       {
+         "ticker": "NVDA",
+         "gamma_flip": 135.5,
+         "volatility_regime": "contraction",
+         "expected_move_30d": 8.5,
+         "ai_strategy": { ... }
+       },
+       ...
+     ]
 
-     【ボラティリティ】
-     - 現在のレジーム: {regime}
-     - 20日間HV: {hv}
-     - 30日間期待移動率: {expected_move}
-     - 下方リスク確率: {downside_prob}
-     - 上方リスク確率: {upside_prob}
-
-     【AI戦略】
-     {ai_strategy_from_quantlib_ai_analyzer}
-
-     トレーダーが実際に使える具体的なエントリー/エグジットレベルと、リスク管理のポイントを含めてください。
+     【要件】
+     1. 各銘柄について、ガンマ分析とボラティリティ分析に基づいた具体的な戦略を記述すること。
+     2. エントリー/エグジットレベルとリスク管理のポイントを含めること。
+     3. 出力は**必ず以下のJSON形式**のみとすること。
+     {
+       "NVDA": "解説テキスト（400文字以内）",
+       "AAPL": "解説テキスト...",
+       ...
+     }
      ```
 
 5. **データをJSONファイルに保存**
