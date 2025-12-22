@@ -1328,15 +1328,15 @@ class AlgoManager {
             <h2>${this.getScreenerDisplayName(this.activeScreener)}</h2>
             <div class="hwb-summary-grid">
                 <div class="summary-card green">
-                    <h3>凪 (Low Vol)</h3>
+                    <h3>Low Vol</h3>
                     <p class="summary-count">${screenerData.filter(s => s.volatility_regime === 'contraction').length}</p>
                 </div>
                 <div class="summary-card yellow">
-                    <h3>通常 (Normal)</h3>
+                    <h3>Normal</h3>
                     <p class="summary-count">${screenerData.filter(s => s.volatility_regime === 'transition').length}</p>
                 </div>
                 <div class="summary-card red">
-                    <h3>嵐 (High Vol)</h3>
+                    <h3>High Vol</h3>
                     <p class="summary-count">${screenerData.filter(s => s.volatility_regime === 'expansion').length}</p>
                 </div>
             </div>
