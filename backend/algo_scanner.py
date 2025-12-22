@@ -145,7 +145,7 @@ class AlgoScanner:
                 # Let's run full collection but with limited scope if needed.
                 # Warning: running full collection might take time.
                 # For this implementation, we will trust IBDDataCollector logic.
-                collector.run_full_collection(use_full_dataset=False, max_workers=5)
+                collector.run_full_collection(use_full_dataset=True, max_workers=5)
                 collector.close()
 
                 # 2. Screening
