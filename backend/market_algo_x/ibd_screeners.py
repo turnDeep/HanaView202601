@@ -683,12 +683,12 @@ class IBDScreeners:
         # 各スクリーナーを実行
         screener_results = {}
 
-        screener_results['Momentum 97'] = self.screener_momentum_97()
-        screener_results['Explosive Estimated EPS Growth Stocks'] = self.screener_explosive_eps_growth()
-        screener_results['Up on Volume List'] = self.screener_up_on_volume()
-        screener_results['Top 2% RS Rating List'] = self.screener_top_2_percent_rs()
-        screener_results['4% Bullish Yesterday'] = self.screener_4_percent_bullish_yesterday()
-        screener_results['Healthy Chart Watch List'] = self.screener_healthy_chart_watchlist()
+        screener_results['momentum_97'] = self.screener_momentum_97()
+        screener_results['explosive_eps'] = self.screener_explosive_eps_growth()
+        screener_results['up_on_volume'] = self.screener_up_on_volume()
+        screener_results['top_2pct_rs'] = self.screener_top_2_percent_rs()
+        screener_results['bullish_4pct'] = self.screener_4_percent_bullish_yesterday()
+        screener_results['healthy_chart'] = self.screener_healthy_chart_watchlist()
 
         print("\n" + "="*80)
         print("すべてのスクリーナー実行完了!")
