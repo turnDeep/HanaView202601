@@ -33,7 +33,13 @@ HanaViewは、個人投資家が毎朝の市場チェックを効率化するた
 - **リアルタイムチャート**: lightweight-chartsによる高度なチャート表示
 - **個別銘柄分析**: 任意のティッカーシンボルで詳細分析
 
-### 2.6 セキュリティ＆通知機能（新機能）
+### 2.6 Algoタブ（新機能）
+- **IBDスタイルスクリーナー**: Momentum 97など6種類の強力なスクリーナー
+- **AI戦略分析**: StageAlgoによるガンマ分析・ボラティリティ分析
+- **Gemini 3 Flash連携**: 最新AIモデルによる具体的なトレーディング戦略解説
+- **権限管理**: 特定ユーザー（ura権限）のみがアクセス可能
+
+### 2.7 セキュリティ＆通知機能（新機能）
 - **PIN認証**: 6桁のPINによるアクセス制御
 - **Push通知**: データ更新時の自動通知（PWA対応）
 - **自動ログイン**: JWTトークンによる30日間の認証維持
@@ -78,6 +84,13 @@ SPECIAL_TICKERS='{"2025/04/16": ["ASML", "(エーエスエムエル・ホール�
 
 # Hanaメモファイルのパス（任意）
 HANA_MEMO_FILE=backend/hana-memo-202509.txt
+
+# Gemini APIキー（Algoタブで必須）
+GEMINI_API_KEY=your_gemini_api_key_here
+
+# FinancialModelingPrep APIキー（Algoタブで推奨）
+# 未設定時はyfinanceによるフォールバックモードで動作します
+FMP_API_KEY=your_fmp_api_key_here
 ```
 
 **重要**: 以下のセキュリティキーは初回起動時に自動生成され、`data/security_keys.json`に保存されます。このファイルは必ずバックアップしてください。
@@ -119,7 +132,9 @@ python -m backend.data_fetcher generate
 
 **注意**: `fetch`コマンドは、S&P 500とNASDAQ 100の全銘柄（約600）の情報を取得するため、完了までに5〜10分程度かかります。
 
-## 5. HWBスキャナーの実行 (Running HWB Scanner)
+## 5. スキャナーの手動実行 (Running Scanners)
+
+### 5.1 HWBスキャナー (200MAタブ)
 
 HWB戦略に基づくRussell 3000銘柄のスキャンを手動で実行できます：
 
@@ -129,12 +144,23 @@ docker compose exec app bash
 python -m backend.hwb_scanner_cli
 ```
 
-スキャン結果は以下に保存されます：
-- **個別銘柄データ**: `data/hwb/symbols/{TICKER}.json`
-- **デイリーサマリー**: `data/hwb/daily/{YYYY-MM-DD}.json`
-- **最新サマリー**: `data/hwb/daily/latest.json`
+### 5.2 Algoスキャナー (Algoタブ)
 
-スキャンは毎日午前6:35に自動実行されます。
+Algoタブ（MarketAlgoX & StageAlgo）のスキャンを手動で実行できます：
+
+```bash
+# コンテナ内で実行
+docker compose exec app bash
+bash backend/cron_job_algo.sh
+```
+
+**注意**:
+- `FMP_API_KEY` が未設定の場合、自動的にデモモード（yfinanceフォールバック）で動作します。
+- `GEMINI_API_KEY` が未設定の場合、AI解説の生成はスキップされます。
+
+スキャン結果は以下に保存されます：
+- **個別銘柄データ**: `data/algo/symbols/{TICKER}.json`
+- **デイリーサマリー**: `data/algo/daily/latest.json`
 
 ## 6. VPSへのデプロイ (Deployment to VPS)
 
@@ -187,6 +213,7 @@ sudo docker-compose up -d --build
 | 6:15 JST | データ取得 | 市場データ・ニュース・経済指標の取得 |
 | 6:28 JST | レポート生成 | AI解説・コラム生成、Push通知送信 |
 | 6:35 JST | HWBスキャン | Russell 3000銘柄のスキャン |
+| 8:00 JST | Algoスキャン | MarketAlgoX & StageAlgo分析の実行 |
 
 **実行日**: 月曜〜金曜（市場営業日）
 
