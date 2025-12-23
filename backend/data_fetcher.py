@@ -1524,7 +1524,7 @@ class MarketDataFetcher:
                     "type": "data-update"
                 }
 
-            is_hwb_scan_notification = notification_data.get("type") == "hwb-scan"
+            notification_type = notification_data.get("type")
 
             sent_count = 0
             failed_subscriptions = []
@@ -1534,9 +1534,14 @@ class MarketDataFetcher:
 
                 # Determine whether to send the notification based on its type and user permission
                 should_send = False
-                if is_hwb_scan_notification:
+
+                if notification_type == "hwb-scan":
                     # For HWB scans, only send to 'secret' or 'ura' users
                     if permission in ["secret", "ura"]:
+                        should_send = True
+                elif notification_type == "algo-scan":
+                    # For Algo scans, only send to 'ura' users
+                    if permission == "ura":
                         should_send = True
                 else:
                     # For all other notifications (e.g., data updates), send to everyone
