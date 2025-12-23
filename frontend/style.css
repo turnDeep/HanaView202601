@@ -1219,30 +1219,73 @@ body {
     color: white;
 }
 
-.regime-badge {
-    padding: 4px 10px;
-    border-radius: 12px;
-    font-size: 11px;
-    font-weight: 700;
-    white-space: nowrap;
+/* Regime dots */
+.status-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-block;
 }
 
-.regime-contraction { background-color: #4CAF50; color: white; }
-.regime-transition { background-color: #FFC107; color: #333; }
-.regime-expansion { background-color: #F44336; color: white; }
-
-.algo-summary-container h2 {
-    color: var(--tab-text);
-    font-size: 1.4em;
-    margin-bottom: 15px;
-    text-align: center;
-    border-bottom: 2px solid var(--border-color);
-    padding-bottom: 10px;
+/* New Algo List Styles (1 Column) */
+.algo-symbol-list-one-col {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 15px;
+    margin-top: 15px;
 }
 
-.summary-card.green { border-left: 5px solid #4CAF50; }
-.summary-card.yellow { border-left: 5px solid #FFC107; }
-.summary-card.red { border-left: 5px solid #F44336; }
+.algo-symbol-item-card {
+    background-color: var(--card-background);
+    border-radius: 8px;
+    box-shadow: 0 2px 8px var(--shadow-color);
+    padding: 15px;
+    display: flex;
+    flex-direction: column;
+}
+
+.algo-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.algo-card-ticker {
+    font-size: 1.2em;
+    font-weight: bold;
+    color: var(--text-primary);
+}
+
+.algo-card-image {
+    width: 100%;
+    margin-bottom: 10px;
+}
+
+.algo-chart-img {
+    width: 100%;
+    height: auto;
+    border-radius: 4px;
+    transition: transform 0.2s;
+    cursor: zoom-in;
+}
+
+.algo-chart-img:active {
+    transform: scale(0.98);
+}
+
+.algo-card-footer {
+    background-color: #f9f9f9;
+    padding: 10px;
+    border-radius: 6px;
+}
+
+.algo-ai-text {
+    margin: 0;
+    font-size: 0.9em;
+    color: #555;
+    line-height: 1.5;
+}
 
 .algo-status-info {
     padding: 10px 15px;
@@ -1254,17 +1297,3 @@ body {
 .algo-status-info.info { background-color: #E3F2FD; color: #1976D2; border: 1px solid #BBDEFB; }
 .algo-status-info.warning { background-color: #FFF8E1; color: #F57C00; border: 1px solid #FFE0B2; }
 .algo-status-info.error { background-color: #FFEBEE; color: #C62828; border: 1px solid #FFCDD2; }
-
-/* Algo-specific modifications to HWB styles reuse */
-.algo-symbol-item {
-    cursor: default; /* Remove pointer if not clickable as a whole */
-}
-
-.algo-chart-img {
-    transition: transform 0.2s;
-    cursor: zoom-in;
-}
-
-.algo-chart-img:active {
-    transform: scale(0.98);
-}
