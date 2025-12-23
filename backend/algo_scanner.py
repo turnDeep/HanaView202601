@@ -98,6 +98,9 @@ class AlgoScanner:
                     ticker = symbol_data['ticker']
                     gemini_analysis = gemini_results.get(ticker)
 
+                    # リスト内のデータにも解説を追加（フロントエンド表示用）
+                    symbol_data['gemini_analysis'] = gemini_analysis
+
                     # 個別銘柄データを保存
                     self.data_manager.save_symbol_data(ticker, {
                         **symbol_data,

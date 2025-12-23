@@ -240,4 +240,20 @@ class GammaPlotter:
         filename = os.path.join(output_dir, f"{self.ticker}_gamma_analysis.png")
         plt.savefig(filename)
         # print(f"Chart saved to {filename}")
+
+        # 3ヶ月拡大版の保存
+        try:
+            # 軸の範囲を直近3ヶ月（約90日）に設定
+            end_date = self.hist.index[-1]
+            start_date = end_date - timedelta(days=90)
+
+            # 各サブプロットのX軸範囲を更新
+            ax1.set_xlim(left=start_date, right=end_date)
+            # ax2, ax3はsharex=Trueなので自動的に連動するはずだが、念のため
+
+            filename_3m = os.path.join(output_dir, f"{self.ticker}_gamma_analysis_3m.png")
+            plt.savefig(filename_3m)
+        except Exception as e:
+            print(f"Error saving 3m chart: {e}")
+
         return filename

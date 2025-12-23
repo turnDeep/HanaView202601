@@ -1282,11 +1282,12 @@ class AlgoManager {
             this.currentView = 'summary';
             this.render();
 
-            const { updated_at, volatility_distribution } = this.summaryData;
+            const { updated_at } = this.summaryData;
             const displayDate = this.formatDate(updated_at);
 
+            // ステータス表示を更新（日付のみ）
             this.showStatus(
-                `最終更新: ${displayDate} | 🟢: ${volatility_distribution.contraction} | 🟡: ${volatility_distribution.transition} | 🔴: ${volatility_distribution.expansion}`,
+                `最終更新: ${displayDate}`,
                 'info'
             );
 
@@ -1312,38 +1313,13 @@ class AlgoManager {
         const container = document.getElementById('algo-content-area');
         container.innerHTML = '';
 
-        this.renderSummaryStats(container);
+        // renderSummaryStatsは削除（タイトルとカードを削除）
+        // this.renderSummaryStats(container);
+
         this.renderSymbolList(container);
     }
 
-    renderSummaryStats(container) {
-        const { summary, volatility_distribution } = this.summaryData;
-        const screenerData = summary[this.activeScreener] || [];
-
-        // 200MA style summary layout
-        const summaryDiv = document.createElement('div');
-        summaryDiv.className = 'algo-summary-container';
-
-        summaryDiv.innerHTML = `
-            <h2>${this.getScreenerDisplayName(this.activeScreener)}</h2>
-            <div class="hwb-summary-grid">
-                <div class="summary-card green">
-                    <h3>凪 (Low Vol)</h3>
-                    <p class="summary-count">${screenerData.filter(s => s.volatility_regime === 'contraction').length}</p>
-                </div>
-                <div class="summary-card yellow">
-                    <h3>通常 (Normal)</h3>
-                    <p class="summary-count">${screenerData.filter(s => s.volatility_regime === 'transition').length}</p>
-                </div>
-                <div class="summary-card red">
-                    <h3>嵐 (High Vol)</h3>
-                    <p class="summary-count">${screenerData.filter(s => s.volatility_regime === 'expansion').length}</p>
-                </div>
-            </div>
-        `;
-
-        container.appendChild(summaryDiv);
-    }
+    // renderSummaryStats removed
 
     renderSymbolList(container) {
         const { summary } = this.summaryData;
@@ -1360,55 +1336,48 @@ class AlgoManager {
             return sortOrder[a.volatility_regime] - sortOrder[b.volatility_regime];
         });
 
-        // Reuse HWB list styles for consistency
+        // 1カラム表示用のリスト（スタイル変更）
         const listDiv = document.createElement('div');
-        listDiv.className = 'algo-symbol-list hwb-symbol-list';
-        // Note: hwb-symbol-list is grid-template-columns: repeat(2, 1fr) by default in CSS for hwb tab.
-        // We might want to use the same or define new class.
-        // Let's use a wrapper section like HWB does.
+        listDiv.className = 'algo-symbol-list-one-col'; // New class for 1-column layout
 
-        const section = document.createElement('div');
-        section.className = 'hwb-symbol-section';
-        section.innerHTML = `<h3>該当銘柄一覧 (${screenerData.length})</h3>`;
-        section.appendChild(listDiv);
-
+        // リストを直接配置（タイトルやセクションラッパーなし）
         sortedData.forEach(item => {
             const symbolItem = this.createSymbolItem(item);
             listDiv.appendChild(symbolItem);
         });
 
-        container.appendChild(section);
+        container.appendChild(listDiv);
     }
 
     createSymbolItem(item) {
         const itemDiv = document.createElement('div');
-        itemDiv.className = 'hwb-symbol-item algo-symbol-item';
-        // hwb-symbol-item styles give card look.
+        itemDiv.className = 'algo-symbol-item-card'; // New class
 
-        const regimeClass = `regime-${item.volatility_regime}`;
-        const regimeLabel = this.getRegimeLabel(item.volatility_regime);
-
-        // Chart URL - assuming gamma plot is available or we use generic chart
-        // The spec says: {ticker}_gamma_analysis.png
+        // Chart URL
         const chartUrl = `/charts/algo/${item.symbol}_gamma_analysis.png?v=${new Date().getTime()}`;
 
+        // Regime Color Circle Logic
+        const regimeColor = this.getRegimeColor(item.volatility_regime);
+
+        // AI Analysis Text
+        // summaryデータ内のitemにgemini_analysisが含まれているか確認
+        // backend/algo_scanner.py で注入したデータを使用
+        const aiAnalysis = item.gemini_analysis ?
+            (typeof item.gemini_analysis === 'string' ? item.gemini_analysis : JSON.stringify(item.gemini_analysis))
+            : 'AI解説なし';
+
         itemDiv.innerHTML = `
-            <div class="hwb-symbol-header" style="width: 100%;">
-                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                    <span class="hwb-symbol-name">${item.symbol}</span>
-                    <span class="regime-badge ${regimeClass}">${regimeLabel}</span>
-                 </div>
-                 <div class="symbol-meta" style="display: flex; flex-wrap: wrap; gap: 5px;">
-                    ${this.renderMetaInfo(item)}
-                 </div>
+            <div class="algo-card-header">
+                 <span class="algo-card-ticker">${item.symbol}</span>
+                 <span class="status-dot" style="background-color: ${regimeColor};"></span>
             </div>
-            <div class="hwb-symbol-chart" style="width: 100%; margin-top: 10px;">
-                <img src="${chartUrl}" alt="${item.symbol} Analysis" class="algo-chart-img" style="width: 100%; height: auto; border-radius: 4px;" loading="lazy" onerror="this.onerror=null;this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMDAgMjAwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjBmMGYwIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGRvbWluYW50LWJhc2VsaW5lPSJtaWRkbGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5OTkiPk5vIENoYXJ0PC90ZXh0Pjwvc3ZnPg==';">
+            <div class="algo-card-image">
+                <img src="${chartUrl}" alt="${item.symbol} Analysis" class="algo-chart-img" loading="lazy" onerror="this.onerror=null;this.src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMDAgMjAwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjBmMGYwIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGRvbWluYW50LWJhc2VsaW5lPSJtaWRkbGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5OTkiPk5vIENoYXJ0PC90ZXh0Pjwvc3ZnPg==';">
+            </div>
+            <div class="algo-card-footer">
+                <p class="algo-ai-text">${aiAnalysis.replace(/\n/g, '<br>')}</p>
             </div>
         `;
-
-        itemDiv.style.flexDirection = 'column';
-        itemDiv.style.alignItems = 'flex-start';
 
         // Add double tap listener
         const img = itemDiv.querySelector('.algo-chart-img');
@@ -1442,6 +1411,15 @@ class AlgoManager {
             'healthy_chart': 'Healthy Chart'
         };
         return names[screenerKey] || screenerKey;
+    }
+
+    getRegimeColor(regime) {
+        const colors = {
+            'contraction': '#00C853', // Green
+            'transition': '#FFD600', // Yellow
+            'expansion': '#FF1744'  // Red
+        };
+        return colors[regime] || '#888888';
     }
 
     getRegimeLabel(regime) {
@@ -1486,8 +1464,8 @@ class AlgoManager {
     async showImagePopup(symbol) {
         try {
             // Load full symbol data including gemini analysis
-            const response = await fetchWithAuth(`/api/algo/symbols/${symbol}`);
-            const data = await response.json();
+            // Use 3m zoomed image URL
+            const zoomChartUrl = `/charts/algo/${symbol}_gamma_analysis_3m.png?v=${new Date().getTime()}`;
 
             const overlay = document.createElement('div');
             overlay.className = 'image-popup-overlay algo-popup-overlay';
@@ -1496,51 +1474,39 @@ class AlgoManager {
             const contentDiv = document.createElement('div');
             contentDiv.className = 'algo-popup-content';
             contentDiv.style.backgroundColor = 'white';
-            contentDiv.style.padding = '20px';
+            contentDiv.style.padding = '10px';
             contentDiv.style.borderRadius = '8px';
-            contentDiv.style.maxWidth = '90%';
+            contentDiv.style.maxWidth = '95%'; // Wider on mobile
             contentDiv.style.maxHeight = '90vh';
             contentDiv.style.overflowY = 'auto';
 
             // Image
             const img = document.createElement('img');
-            img.src = data.analysis_data.gamma_plot;
+            img.src = zoomChartUrl;
             img.className = 'algo-popup-image';
             img.style.width = '100%';
             img.style.height = 'auto';
-            img.style.marginBottom = '15px';
 
-            // Analysis text
-            const analysisDiv = document.createElement('div');
-            analysisDiv.className = 'algo-popup-analysis';
-            if (data.gemini_analysis) {
-                 // Check if gemini_analysis is a string or object (spec says string in one place, json in another?)
-                 // Spec says: "gemini_analysis": "..." (string) in response example.
-                 // But batch generation prompt returns JSON map.
-                 // Stored data likely has the string for that ticker.
-                 let text = typeof data.gemini_analysis === 'string' ? data.gemini_analysis : JSON.stringify(data.gemini_analysis);
-
-                 analysisDiv.innerHTML = `
-                    <h3 style="color:#006B6B; border-bottom:1px solid #ddd; padding-bottom:5px;">AI戦略解説 (${symbol})</h3>
-                    <p style="line-height:1.6; color:#333;">${text.replace(/\n/g, '<br>')}</p>
-                 `;
-            } else {
-                 analysisDiv.innerHTML = `<p>解説データはありません。</p>`;
-            }
+            // Error handling for 3m chart (fallback to normal chart)
+            img.onerror = function() {
+                this.src = `/charts/algo/${symbol}_gamma_analysis.png?v=${new Date().getTime()}`;
+            };
 
             contentDiv.appendChild(img);
-            contentDiv.appendChild(analysisDiv);
             overlay.appendChild(contentDiv);
 
             overlay.addEventListener('click', (e) => {
                 if (e.target === overlay) document.body.removeChild(overlay);
             });
 
+            // Allow closing by clicking image too? No, maybe user wants to zoom more?
+            // User requested "double tap to show zoomed image". This popup IS the zoomed image.
+
             document.body.appendChild(overlay);
 
         } catch (error) {
             console.error('Popup error:', error);
-            alert('詳細データの読み込みに失敗しました。');
+            alert('画像の読み込みに失敗しました。');
         }
     }
 
