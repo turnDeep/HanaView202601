@@ -844,10 +844,12 @@ class MarketDataFetcher:
             logger.error(f"Error calling Gemini API: {e}")
             raise MarketDataError("E005", str(e)) from e
 
-    def generate_market_commentary(self):
-        logger.info("Generating AI commentary...")
+    def generate_unified_report(self):
+        logger.info("Generating unified AI report...")
 
-        # --- Fear & Greed Data ---
+        # --- 1. Prepare Data ---
+
+        # Market Data
         fear_greed_data = self.data.get('market', {}).get('fear_and_greed', {})
         fg_now_val = fear_greed_data.get('now', 'N/A')
         fg_now_cat = self._get_fear_greed_category(fg_now_val)
@@ -856,522 +858,269 @@ class MarketDataFetcher:
         fg_month_val = fear_greed_data.get('prev_month', 'N/A')
         fg_month_cat = self._get_fear_greed_category(fg_month_val)
 
-        # --- VIX and T-Note History ---
         vix_history = self.data.get('market', {}).get('vix', {}).get('history', [])
         t_note_history = self.data.get('market', {}).get('t_note_future', {}).get('history', [])
 
-        # Function to format history for the prompt
         def format_history(history, days=30):
-            if not history:
-                return "N/A"
-            # Assuming history is sorted, take the last 'days' worth of 4-hour intervals
-            # 30 days * 6 (4h intervals per day) = 180 data points
+            if not history: return "N/A"
             recent_history = history[- (days * 6) :]
             return ", ".join([str(item['close']) for item in recent_history])
 
         vix_history_str = format_history(vix_history)
         t_note_history_str = format_history(t_note_history)
 
-        prompt = f"""あなたはプロの金融アナリストです。以下の市場データを分析し、特にこの1ヶ月間の各指標の「推移」から読み取れる市場センチメントの変化を、日本の個人投資家向けに300字程度で分かりやすく解説してください。自然な文章で、改行を適切に使用して記述してください。
-
-        # 分析対象データ
-        - **Fear & Greed Index**:
-          - 1ヶ月前: {fg_month_val} ({fg_month_cat})
-          - 1週間前: {fg_week_val} ({fg_week_cat})
-          - 現在: {fg_now_val} ({fg_now_cat})
-
-        - **VIX指数 (恐怖指数) - 過去1ヶ月の終値の推移**:
-          - {vix_history_str}
-
-        - **米国10年債金利 - 過去1ヶ月の終値の推移**:
-          - {t_note_history_str}
-
-        # 解説のポイント
-        1.  **Fear & Greed Indexの推移**: 1ヶ月前から現在にかけて、投資家心理が「恐怖」と「強欲」のどちらの方向へ、どの程度変化したかを具体的に指摘してください。
-        2.  **VIX指数の動向**: VIX指数がこの1ヶ月で上昇傾向か、下降傾向か、あるいは特定のレンジで安定しているかを述べ、それが市場の不確実性やリスク許容度について何を示唆しているかを説明してください。
-        3.  **10年債金利の動向**: 金利の推移が株式市場（特にハイテク株など金利に敏感なセクター）にどのような影響を与えている可能性があるかを1ヶ月分のデータ、特に直近の値との比較から分析してください。
-        4.  **総合的な結論**: これら3つの指標の関連性を考慮し、現在の市場がどのような状況にあるのか（例：「リスクオンムードが高まっている」「警戒感が強い」など）を結論付けてください。
-
-        # 出力形式
-        必ず以下のJSON形式で出力してください：
-        {{"response": "ここに解説を記述"}}
-
-        重要：出力は有効なJSONである必要があります。"""
-
-        try:
-            response_json = self._call_gemini_api(prompt)
-            self.data['market']['ai_commentary'] = response_json.get('response', 'AI解説の生成に失敗しました。')
-        except Exception as e:
-            logger.error(f"Failed to generate and parse AI commentary: {e}")
-            self.data['market']['ai_commentary'] = "AI解説の生成中にエラーが発生しました。"
-
-    def generate_news_analysis(self):
-        """Generates AI news summary and topics based on fetched Yahoo Finance news."""
-        logger.info("Generating AI news analysis...")
-
-        raw_news = self.data.get('news_raw')
-        if not raw_news:
-            logger.warning("No raw news available to generate AI news.")
-            self.data['news'] = {
-                "summary": "ニュースが取得できなかったため、AIによる分析は行えませんでした。",
-                "topics": [],
-            }
-            return
-
-        # The limit of 5 news items has been removed to allow the AI to analyze all news from the last 24 hours.
-        top_news = raw_news
-
-        news_content = ""
-        for i, item in enumerate(top_news):
-            news_content += f"記事{i+1}:\n"
-            news_content += f"  - タイトル: {item['title']}\n"
-            news_content += f"  - 概要: {item.get('summary', 'N/A')}\n"
-            news_content += f"  - URL: {item['link']}\n\n"
-
-        prompt = f"""
-        以下の米国市場に関する最新ニュース記事群を分析し、日本の個人投資家向けに解説してください。
-
-        # ニュース記事
-        ---
-        {news_content}
-        ---
-
-        # 指示
-        1.  上記のニュース全体から、今日の市場のムードが最も伝わるように「今朝の3行サマリー」を作成してください。
-        2.  次に、以下の「トピック選択の指針」に従って、最も重要と思われる「主要トピック」を3つ選んでください。
-        3.  各トピックについて、以下の情報を1つの自然で連続した文章にまとめてください。**この文章には「事実:」などのラベルや改行を含めないでください。**
-            - そのニュースの客観的な事実。
-            - その事実が市場でどのように受け止められているかの解釈。
-            - 今後の市場に与えうる短期的な影響。
-        4.  分析の基となった記事のURLも必ず含めてください。
-
-        # トピック選択の指針
-        市場全体への影響度が大きいニュースを優先してください。特に、以下の点を重視してください。
-        - **巨大テック企業 (Mega-cap Tech):** Apple, Microsoft, NVIDIAなど、時価総額が極めて大きい企業の動動は市場全体に影響を与えやすいため重要です。
-        - **マクロ経済:** 金利の変動やVIX指数の動きに直接関連するニュース（例: FRBの金融政策、インフレ指標、雇用統計など）は、最も高い優先度で扱ってください。
-
-        # 出力形式
-        以下のJSON形式で、厳密に出力してください。`analysis`フィールドには、指示3に従って生成した、ラベルや改行を含まない単一の文章を格納してください。
-
-        {{
-          "summary": "ここに3行のサマリーを記述",
-          "topics": [
-            {{
-              "title": "トピック1のタイトル（20文字以内）",
-              "analysis": "（ここに事実、解釈、市場への影響をまとめた、ラベルや改行なしの自然な文章を記述）",
-              "url": "基となった記事のURL"
-            }},
-            {{
-              "title": "トピック2のタイトル（20文字以内）",
-              "analysis": "（ここに事実、解釈、市場への影響をまとめた、ラベルや改行なしの自然な文章を記述）",
-              "url": "基となった記事のURL"
-            }},
-            {{
-              "title": "トピック3のタイトル（20文字以内）",
-              "analysis": "（ここに事実、解釈、市場への影響をまとめた、ラベルや改行なしの自然な文章を記述）",
-              "url": "基となった記事のURL"
-            }}
-          ]
-        }}
-        """
-        try:
-            news_data = self._call_gemini_api(prompt)
-            if isinstance(news_data, str) or 'error' in news_data:
-                 raise MarketDataError("E005", f"AI news analysis failed: {news_data}")
-            self.data['news'] = news_data
-        except Exception as e:
-            logger.error(f"Could not generate AI news: {e}")
-            self.data['news'] = {
-                "summary": "AIによるニュースの分析に失敗しました。",
-                "topics": [],
-                "error": str(e)
-            }
-
-    def generate_column(self):
-        today = datetime.now(pytz.timezone('Asia/Tokyo'))
-        logger.info("Generating AI column...")
-
-        try:
-            memo_file_path = os.getenv('HANA_MEMO_FILE', 'backend/hana-memo-202509.txt') # Fallback for safety
-            with open(memo_file_path, 'r', encoding='utf-8') as f:
-                memo_content = f.read()
-        except FileNotFoundError:
-            memo_content = "メモファイルが見つかりません。"
-            logger.warning(f"Memo file not found at {memo_file_path}")
-
-        market_data = self.data.get("market", {})
-
-        # Format news from news_raw for the prompt
+        # News Data
         raw_news = self.data.get('news_raw', [])
-        if raw_news:
-            # The limit of 20 news items has been removed.
-            news_items_str = "\n".join([f"- {item['title']}: {item.get('summary', '概要なし')}" for item in raw_news])
-        else:
-            news_items_str = "利用可能なニュース記事はありません。"
+        news_content = ""
+        for i, item in enumerate(raw_news): # Use all raw news
+            news_content += f"記事{i+1}: タイトル: {item['title']}, 概要: {item.get('summary', 'N/A')}, URL: {item['link']}\n"
+        if not news_content: news_content = "ニュースなし"
 
-        fg_data = market_data.get('fear_and_greed', {})
-        fg_now_val = fg_data.get('now', 'N/A')
-        vix_val = market_data.get('vix', {}).get('current', 'N/A')
-        tnote_val = market_data.get('t_note_future', {}).get('current', 'N/A')
-        market_structure_str = f"Fear & Greed Index: {fg_now_val}, VIX指数: {vix_val}, 米国10年債金利: {tnote_val}%"
-
-        indicators = self.data.get("indicators", {}).get("economic", [])
-        indicators_str = json.dumps(indicators, ensure_ascii=False, indent=2) if indicators else "本日は注目すべき経済指標の発表はありません。"
-
-        base_prompt_intro = """
-# 命令書
-あなたはプロの金融アナリストです。提供されたマーケットデータとメモを基に、日本の個人投資家向けの「ワンポイント市況解説」を、以下の指示に従って**日本語で**作成してください。
-
-# 指示
-- **厳格なデータ参照**: 解説は、必ず「提供データ」セクションにある情報**のみ**に基づいて作成してください。
-- **フォーマット**:
-  - 各セクションは指定された見出し（例: 「⭐本日の注目ポイント」）を使ってください。
-  - 見出し以外では、不要な記号（○、→、▲など）や絵文字は一切使わないでください。
-  - 各セクションの内容は、自然な文章で、改行を適切に使用して記述してください。
-- **セクション構成**:
-"""
-
-        if today.weekday() == 0:  # Monday
-            specific_instructions = """
-  1.  **⭐今週の注目ポイント**
-      - 「経済指標カレンダー」と「直近1週間のニュース」を参考に、今週の相場で最も重要となるイベントやテーマを特定してください。
-      - 経済指標については、その重要度と市場予測を基に解説してください。
-      - ニュースについては、市場全体のセンチメントに影響を与えそうな大きな話題を取り上げてください。
-
-  2.  **📌いまの市場の構図**
-      - 「市場の構図（参考データ）」を基に、現在の市場センチメント（Fear & Greed Index、VIX指数、10年債金利）を要約してください。
-
-  3.  **🌸今週の戦略アドバイス**
-      - 上記の分析、ニュース、参考情報を総合的に判断し、今週の市場に臨む上での心構えや注目点を提案してください。
-      - **禁止事項**: 「ロング」「ショート」「買い」「売り」といった直接的な投資判断を示す言葉は絶対に使用しないでください。
-      - リスク管理の重要性についても触れてください。
-"""
-            news_section_title = "直近1週間のニュース"
-        else:  # Tuesday to Friday
-            specific_instructions = """
-  1.  **⭐本日の注目ポイント**
-      - 「経済指標カレンダー」と「直近24時間のニュース」を参考に、本日の相場で最も重要となるイベントやテーマを特定してください。
-      - 経済指標については、その重要度と市場予測を基に解説してください。なければ「なし」と答えてください。
-      - ニュースについては、市場全体のセンチメントに影響を与えそうな大きな話題を取り上げてください。
-
-  2.  **📌いまの市場の構図**
-      - 「市場の構図（参考データ）」を基に、現在の市場センチメント（Fear & Greed Index、VIX指数、10年債金利）を要約してください。
-
-  3.  **🌸今日の戦略アドバイス**
-      - 上記の分析、ニュース、参考情報を総合的に判断し、今日の市場に臨む上での心構えや注目点を提案してください。
-      - **禁止事項**: 「ロング」「ショート」「買い」「売り」といった直接的な投資判断を示す言葉は絶対に使用しないでください。
-      - リスク管理の重要性についても触れてください。
-"""
-            news_section_title = "直近24時間のニュース"
-
-        data_section = f"""
-# 提供データ
-
-## 経済指標カレンダー
-{indicators_str}
-
-## 参考情報
-{memo_content}
-
-## {news_section_title}
-{news_items_str}
-
-## 市場の構図（参考データ）
-{market_structure_str}
-"""
-        json_format_instruction = """
-
-# 出力形式
-必ず以下のJSON形式で出力してください：
-{{
-    "response": "ここに指示に従って生成した解説全文を記述"
-}}
-
-重要：出力は有効なJSONである必要があります。"""
-        prompt = base_prompt_intro + specific_instructions + data_section + json_format_instruction
-
-        try:
-            response_json = self._call_gemini_api(prompt)
-
-            generated_text = response_json.get('response', 'AIコラムの生成に失敗しました。')
-
-            # レポートタイプのキーを決定
-            report_type = "weekly_report" if today.weekday() == 0 else "daily_report"
-
-            self.data['column'] = {
-                report_type: {
-                    "title": "AI解説", # タイトルは固定または動的に生成可能
-                    "date": today.isoformat(),
-                    "content": generated_text
-                }
-            }
-        except Exception as e:
-            logger.error(f"Error generating column: {e}")
-            report_type = "weekly_report" if today.weekday() == 0 else "daily_report"
-            self.data['column'] = {
-                report_type: {
-                    "error": "コラム生成中にエラーが発生しました。"
-                }
-            }
-
-    def generate_heatmap_commentary(self):
-        """Generates AI commentary for heatmaps based on 1-day, 1-week, and 1-month performance."""
-        logger.info("Generating heatmap AI commentary...")
-
-        def get_stock_performance(stocks, count=5):
-            if not stocks: return [], []
-            # Ensure performance is a float for sorting
+        # Heatmap Data
+        def get_stock_performance_str(stocks, count=5):
+            if not stocks: return "N/A", "N/A"
             valid_stocks = [s for s in stocks if isinstance(s.get('performance'), (int, float))]
             sorted_stocks = sorted(valid_stocks, key=lambda x: x.get('performance', 0), reverse=True)
-            top = sorted_stocks[:count]
-            bottom = sorted_stocks[-count:]
+            top = ', '.join([f"{s['ticker']} ({s['performance']:.2f}%)" for s in sorted_stocks[:count]])
+            bottom = ', '.join([f"{s['ticker']} ({s['performance']:.2f}%)" for s in sorted_stocks[-count:]])
             return top, bottom
 
-        for index_base_name in ['sp500', 'nasdaq']:
-            try:
-                heatmap_1d = self.data.get(f'{index_base_name}_heatmap_1d', {})
-                if not heatmap_1d.get('stocks'):
-                    logger.warning(f"No 1-day data for {index_base_name}, skipping AI commentary.")
-                    self.data[f'{index_base_name}_heatmap']['ai_commentary'] = "データ不足のためヒートマップ解説をスキップしました。"
-                    continue
+        # SP500
+        sp500_stocks = self.data.get('sp500_heatmap_1d', {}).get('stocks', [])
+        sp500_top, sp500_bottom = get_stock_performance_str(sp500_stocks)
 
-                top_5_stocks, bottom_5_stocks = get_stock_performance(heatmap_1d.get('stocks', []))
-                top_stocks_str = ', '.join([f"{s['ticker']} ({s['performance']:.2f}%)" for s in top_5_stocks]) if top_5_stocks else "N/A"
-                bottom_stocks_str = ', '.join([f"{s['ticker']} ({s['performance']:.2f}%)" for s in bottom_5_stocks]) if bottom_5_stocks else "N/A"
+        # Sector ETFs
+        etf_heatmap_1d = self.data.get('sector_etf_heatmap_1d', {}).get('etfs', [])
+        etf_heatmap_1w = self.data.get('sector_etf_heatmap_1w', {}).get('etfs', [])
+        etf_heatmap_1m = self.data.get('sector_etf_heatmap_1m', {}).get('etfs', [])
 
-                if index_base_name == 'sp500':
-                    # --- SP500: Use Sector ETF data ---
-                    etf_heatmap_1d = self.data.get('sector_etf_heatmap_1d', {}).get('etfs', [])
-                    etf_heatmap_1w = self.data.get('sector_etf_heatmap_1w', {}).get('etfs', [])
-                    etf_heatmap_1m = self.data.get('sector_etf_heatmap_1m', {}).get('etfs', [])
+        def get_etf_str(etfs):
+            if not etfs: return "N/A", "N/A"
+            sorted_etfs = sorted(etfs, key=lambda x: x.get('performance', 0), reverse=True)
+            top = ', '.join([f"{s['ticker']} ({s['performance']:.2f}%)" for s in sorted_etfs[:3]])
+            bottom = ', '.join([f"{s['ticker']} ({s['performance']:.2f}%)" for s in sorted_etfs[-3:]])
+            return top, bottom
 
-                    if not etf_heatmap_1d:
-                        logger.warning("No Sector ETF data available for SP500 commentary.")
-                        self.data[f'{index_base_name}_heatmap']['ai_commentary'] = "セクターETFデータが不足しているため、ヒートマップ解説をスキップしました。"
-                        continue
+        etf_1d_top, etf_1d_bottom = get_etf_str(etf_heatmap_1d)
+        etf_1w_top, _ = get_etf_str(etf_heatmap_1w)
+        etf_1m_top, _ = get_etf_str(etf_heatmap_1m)
 
-                    etfs_1d_sorted = sorted(etf_heatmap_1d, key=lambda x: x.get('performance', 0), reverse=True)
-                    etfs_1w_sorted = sorted(etf_heatmap_1w, key=lambda x: x.get('performance', 0), reverse=True)
-                    etfs_1m_sorted = sorted(etf_heatmap_1m, key=lambda x: x.get('performance', 0), reverse=True)
+        # Nasdaq
+        nasdaq_stocks = self.data.get('nasdaq_heatmap_1d', {}).get('stocks', [])
+        nasdaq_top, nasdaq_bottom = get_stock_performance_str(nasdaq_stocks)
 
-                    top_3_etfs_1d = ', '.join([f"{s['ticker']} ({s['performance']:.2f}%)" for s in etfs_1d_sorted[:3]]) if etfs_1d_sorted else "N/A"
-                    bottom_3_etfs_1d = ', '.join([f"{s['ticker']} ({s['performance']:.2f}%)" for s in etfs_1d_sorted[-3:]]) if etfs_1d_sorted else "N/A"
-                    top_3_etfs_1w = ', '.join([f"{s['ticker']} ({s['performance']:.2f}%)" for s in etfs_1w_sorted[:3]]) if etfs_1w_sorted else "N/A"
-                    top_3_etfs_1m = ', '.join([f"{s['ticker']} ({s['performance']:.2f}%)" for s in etfs_1m_sorted[:3]]) if etfs_1m_sorted else "N/A"
-
-                    prompt = f"""
-                    あなたはプロの金融アナリストです。以下のS&P 500のヒートマップデータと、セクター別ETFのパフォーマンスを分析し、日本の個人投資家向けに、市場の状況を分かりやすく解説してください。自然な文章で、改行を適切に使用して記述してください。
-
-                    # データ
-                    ## セクター別ETFパフォーマンス
-                    - **1日間**
-                      - 上位3セクターETF: {top_3_etfs_1d}
-                      - 下位3セクターETF: {bottom_3_etfs_1d}
-                    - **1週間**
-                      - 上位3セクターETF: {top_3_etfs_1w}
-                    - **1ヶ月**
-                      - 上位3セクターETF: {top_3_etfs_1m}
-
-                    ## S&P 500 個別銘柄パフォーマンス (1日間)
-                    - 上昇上位5銘柄: {top_stocks_str}
-                    - 下落上位5銘柄: {bottom_stocks_str}
-
-                    # 指示
-                    以下の3つの点を必ず含めて、250字〜300字程度で解説を作成してください。
-
-                    1.  **短期・中期トレンドの要約**: セクターETFの1日、1週間、1ヶ月のデータから、現在の市場の短期的な勢いと中期的なトレンドを読み解いてください。
-                    2.  **セクターローテーションの兆候**: 短期と中期のパフォーマンスを比較し、資金がどのセクターからどのセクターへ移動しているか（セクターローテーション）の兆候をETFの動きから指摘してください。例えば、「ハイテク(XLK)からエネルギー(XLE)へ資金が流れている可能性があります」のように記述します。
-                    3.  **市場の牽引役**: 1日のパフォーマンスが特に良かったS&P 500の個別銘柄をいくつか挙げ、それらが属するセクターのETFの動きと関連付けて、当日の相場をどのセクター・銘柄が牽引したかを説明してください。
-
-                    # 出力形式
-                    必ず以下のJSON形式で出力してください：
-                    {{
-                        "response": "ここに解説を記述"
-                    }}
-
-                    重要：出力は有効なJSONである必要があります。
-                    """
-                else: # index_base_name == 'nasdaq'
-                    prompt = f"""
-                    あなたはプロの金融アナリストです。以下の{index_base_name.upper()}のヒートマップデータを分析し、日本の個人投資家向けに、市場の状況を分かりやすく解説してください。自然な文章で、改行を適切に使用して記述してください。
-
-                    # データ
-                    ## 個別銘柄パフォーマンス (1日間)
-                    - 上昇上位5銘柄: {top_stocks_str}
-                    - 下落上位5銘柄: {bottom_stocks_str}
-
-                    # 指示
-                    以下の2つの点を必ず含めて、200字〜250字程度で解説を作成してください。
-
-                    1.  **市場の概観**: 上昇・下落が目立った銘柄を基に、当日の{index_base_name.upper()}市場がどのようなテーマで動いたかを要約してください。
-                    2.  **注目銘柄**: 特にパフォーマンスが良かった、あるいは悪かった銘柄をいくつか挙げ、その背景にどのようなニュースや要因があった可能性があるかについて、あなたの専門知識を基に推測を加えてください。
-
-                    # 出力形式
-                    必ず以下のJSON形式で出力してください：
-                    {{
-                        "response": "ここに解説を記述"
-                    }}
-
-                    重要：出力は有効なJSONである必要があります。
-                    """
-                response_json = self._call_gemini_api(prompt)
-                commentary = response_json.get('response', 'AI解説の生成に失敗しました。')
-                # Assign commentary to the existing dictionary to avoid overwriting other keys
-                if f'{index_base_name}_heatmap' not in self.data:
-                    self.data[f'{index_base_name}_heatmap'] = {}
-                self.data[f'{index_base_name}_heatmap']['ai_commentary'] = commentary
-
-            except Exception as e:
-                logger.error(f"Failed to generate and parse AI commentary for {index_base_name}: {e}")
-                if f'{index_base_name}_heatmap' not in self.data:
-                    self.data[f'{index_base_name}_heatmap'] = {}
-                self.data[f'{index_base_name}_heatmap']['ai_commentary'] = "AI解説の生成中にエラーが発生しました。"
-
-    def generate_indicators_commentary(self):
-        """Generates AI commentary for economic indicators and earnings announcements."""
-        logger.info("Generating indicators AI commentary...")
+        # Indicators Data
         jst = timezone(timedelta(hours=9))
         today = datetime.now(jst)
         is_monday = today.weekday() == 0
 
-        # --- Part 1: Economic Indicators ---
+        # Economic
+        economic_indicators = self.data.get("indicators", {}).get("economic", [])
+        us_indicators = [ind for ind in economic_indicators if "🇺🇸" in ind.get("name", "")]
+        def sort_key_ind(indicator):
+            importance = indicator.get("importance", "")
+            if "★★★" in importance: return 0
+            if "★★" in importance: return 1
+            if "★" in importance: return 2
+            return 3
+        us_indicators.sort(key=sort_key_ind)
+
+        if is_monday:
+            target_indicators = us_indicators[:25]
+        else:
+            target_indicators = us_indicators # All for the day
+
+        indicators_str = "\n".join([f"- {ind['name']} (重要度: {ind['importance']}): 前回: {ind['previous']}, 市場予測: {ind['forecast']}" for ind in target_indicators])
+        if not indicators_str: indicators_str = "なし"
+
+        # Earnings
+        us_earnings = self.data.get("indicators", {}).get("us_earnings", [])
+        def earnings_sort_key(earning):
+            return 0 if earning.get("ticker") in US_TICKER_LIST else 1
+        us_earnings.sort(key=earnings_sort_key)
+
+        if is_monday:
+            target_earnings = us_earnings[:30]
+        else:
+            target_earnings = us_earnings[:15]
+
+        earnings_str = "\n".join([f"- {earning.get('company', '')} ({earning.get('ticker')})" for earning in target_earnings])
+        if not earnings_str: earnings_str = "なし"
+
+        # Column Data
         try:
-            economic_indicators = self.data.get("indicators", {}).get("economic", [])
+            memo_file_path = os.getenv('HANA_MEMO_FILE', 'backend/hana-memo-202509.txt')
+            with open(memo_file_path, 'r', encoding='utf-8') as f:
+                memo_content = f.read()
+        except FileNotFoundError:
+            memo_content = "メモファイルが見つかりません。"
 
-            # 1. Filter for US indicators only
-            us_indicators = [ind for ind in economic_indicators if "🇺🇸" in ind.get("name", "")]
+        vix_val = self.data.get('market', {}).get('vix', {}).get('current', 'N/A')
+        tnote_val = self.data.get('market', {}).get('t_note_future', {}).get('current', 'N/A')
+        market_structure_str = f"Fear & Greed Index: {fg_now_val}, VIX指数: {vix_val}, 米国10年債金利: {tnote_val}%"
 
-            # 2. Sort by importance (★★★ > ★★ > ★)
-            def sort_key(indicator):
-                importance = indicator.get("importance", "")
-                if "★★★" in importance: return 0
-                if "★★" in importance: return 1
-                if "★" in importance: return 2
-                return 3
-            us_indicators.sort(key=sort_key)
+        # Specific instructions based on Monday vs other days
+        if is_monday:
+            column_instructions = """
+            1.  **⭐今週の注目ポイント**
+                - 「経済指標」と「ニュース」を参考に、今週の相場で最も重要となるイベントやテーマを特定。
+            2.  **📌いまの市場の構図**
+                - 「市場の構図データ」を基に、現在の市場センチメントを要約。
+            3.  **🌸今週の戦略アドバイス**
+                - 上記を総合的に判断し、心構えや注目点を提案（投資判断ワード禁止）。
+            """
+            indicator_task = "今週発表される米国の主要な経済指標から特に重要なものを5つ程度選び、週間の見通しを解説 (400字程度)"
+            earnings_task = "今週決算発表を予定している米国の主要企業リストから特に重要なものを5社程度選び、週間の見通しを解説 (400字程度)"
+        else:
+            column_instructions = """
+            1.  **⭐本日の注目ポイント**
+                - 「経済指標」と「ニュース」を参考に、本日の相場で最も重要となるイベントやテーマを特定。
+            2.  **📌いまの市場の構図**
+                - 「市場の構図データ」を基に、現在の市場センチメントを要約。
+            3.  **🌸今日の戦略アドバイス**
+                - 上記を総合的に判断し、心構えや注目点を提案（投資判断ワード禁止）。
+            """
+            indicator_task = "本日発表される米国の経済指標の中から最も重要なものを3つ程度選び、市場への影響を解説 (300字程度)"
+            earnings_task = "本日決算発表を予定している米国企業リストの中から注目すべきものを3〜5社選び、解説 (300字程度)"
 
-            if not us_indicators:
-                self.data['indicators']['economic_commentary'] = "なし"
-                return # Skip to earnings part
 
-            if is_monday:
-                # On Monday, take top 25 for the week
-                target_indicators = us_indicators[:25]
-                indicators_str = "\n".join([f"- {ind['name']} (重要度: {ind['importance']}): 前回: {ind['previous']}, 市場予測: {ind['forecast']}" for ind in target_indicators])
-                prompt = f"""
-                あなたはプロの金融アナリストです。以下の今週発表される**米国の主要な経済指標**リストの中から、特に重要なものを**5つ程度**選び出し、週間の見通しを解説してください。
+        # --- 2. Construct Prompt ---
+        prompt = f"""
+        あなたはプロの金融アナリストです。以下の提供データを基に、日本の個人投資家向けに複数のレポートを作成してください。
 
-                # 分析対象の経済指標 (今週発表される米国指標、重要度順に最大25件)
-                {indicators_str}
+        # 提供データ
 
-                # 指示
-                1.  リストの中から、株式市場に最も影響を与えうる最重要指標を**5つ程度**選んでください。
-                2.  選んだ指標について、それぞれの重要性と、結果が市場予測に比べて「上振れ」「下振れ」した場合に株価へどのような影響を与えうるかを解説してください。
-                3.  全体を**400字程度**にまとめ、今週の相場を展望する上でのポイントを明確にしてください。
-                4.  専門用語を避け、分かりやすい言葉で説明してください。
-                5.  解説文のみを生成してください。前置きや結びの言葉は不要です。
+        ## 1. 市場データ
+        - Fear & Greed Index: 1ヶ月前 {fg_month_val}({fg_month_cat}), 1週間前 {fg_week_val}({fg_week_cat}), 現在 {fg_now_val}({fg_now_cat})
+        - VIX指数推移(直近): {vix_history_str}
+        - 米国10年債金利推移(直近): {t_note_history_str}
+        - 市場の構図データ: {market_structure_str}
 
-                # 出力形式
-                {{
-                    "response": "ここに解説を記述"
-                }}
-                """
-                max_tokens = 800 # Allow more tokens for summarization
-            else:
-                # On other days, use all available US indicators for the day
-                target_indicators = us_indicators
-                indicators_str = "\n".join([f"- {ind['name']} (重要度: {ind['importance']}): 前回: {ind['previous']}, 市場予測: {ind['forecast']}" for ind in target_indicators])
-                prompt = f"""
-                あなたはプロの金融アナリストです。以下の本日発表される**米国の経済指標**の中から、最も重要なものを**3つ程度**選び、日本の個人投資家向けに市場への影響を**300字程度**で解説してください。
+        ## 2. ニュース
+        {news_content}
 
-                # 分析対象の経済指標 (本日発表される米国指標)
-                {indicators_str}
+        ## 3. ヒートマップデータ (S&P 500)
+        - セクターETF (1日) 上位: {etf_1d_top}, 下位: {etf_1d_bottom}
+        - セクターETF (1週間) 上位: {etf_1w_top}
+        - セクターETF (1ヶ月) 上位: {etf_1m_top}
+        - 個別株 (1日) 上昇: {sp500_top}, 下落: {sp500_bottom}
 
-                # 指示
-                1.  各指標について、予測に対する結果が「上振れ」「下振れ」「同等」だった場合に、それぞれ株式市場（特に米国株や日本株）にどのような影響（ポジティブ/ネガティブ）を与えうるかを簡潔に解説してください。
-                2.  複数の指標について解説する場合は、指標ごとに改行して見やすくしてください。
-                3.  専門用語を避け、分かりやすい言葉で説明してください。
-                4.  解説文のみを生成してください。前置きや結びの言葉は不要です。
+        ## 4. ヒートマップデータ (NASDAQ 100)
+        - 個別株 (1日) 上昇: {nasdaq_top}, 下落: {nasdaq_bottom}
 
-                # 出力形式
-                {{
-                    "response": "ここに解説を記述"
-                }}
-                """
-                max_tokens = 600
+        ## 5. 経済指標
+        {indicators_str}
 
+        ## 6. 決算発表
+        {earnings_str}
+
+        ## 7. メモ (コラム用参考情報)
+        {memo_content}
+
+        # 作成指示
+
+        以下の各セクションのレポートを作成し、JSON形式で出力してください。
+
+        ## A. market_commentary (市場センチメント解説)
+        - 1ヶ月間の「推移」から読み取れるセンチメント変化を300字程度で解説。
+        - Fear & Greed, VIX, 金利の動向と相互関連性を分析。
+        - 現在の市場状況（リスクオン/オフなど）を結論付ける。
+
+        ## B. news_analysis (ニュース分析)
+        - `summary`: 今朝の市場ムードを表す3行サマリー。
+        - `topics`: 重要トピック3つ。各トピックは `title` (20字以内), `analysis` (事実・解釈・影響をまとめた改行なしの文章), `url` を含む。巨大テックやマクロ経済を優先。
+
+        ## C. sp500_commentary (S&P 500 ヒートマップ解説)
+        - 250~300字程度。
+        - セクターETFの動きから短期・中期トレンドとセクターローテーションの兆候を分析。
+        - 個別株の動きとセクターの関連性を説明。
+
+        ## D. nasdaq_commentary (NASDAQ 100 ヒートマップ解説)
+        - 200~250字程度。
+        - 上昇・下落銘柄から市場のテーマを要約。
+        - 注目銘柄の背景要因を推測。
+
+        ## E. economic_commentary (経済指標解説)
+        - {indicator_task}
+        - 予測との乖離による影響を考慮。
+
+        ## F. earnings_commentary (決算解説)
+        - {earnings_task}
+        - 市場期待と株価反応の可能性を解説。
+
+        ## G. column (ワンポイント市況解説)
+        - `title`: "AI解説"
+        - `content`: 以下の構成で作成。
+            {column_instructions}
+            - 見出し以外に記号や絵文字は使用しない。
+
+        # 出力形式
+        必ず以下のJSON形式で出力してください。Markdownのコードブロックは含めないでください。
+
+        {{
+          "market_commentary": "...",
+          "news_analysis": {{
+            "summary": "...",
+            "topics": [ {{ "title": "...", "analysis": "...", "url": "..." }}, ... ]
+          }},
+          "sp500_commentary": "...",
+          "nasdaq_commentary": "...",
+          "economic_commentary": "...",
+          "earnings_commentary": "...",
+          "column": {{
+            "title": "AI解説",
+            "content": "..."
+          }}
+        }}
+        """
+
+        try:
+            # Call Gemini
             response_json = self._call_gemini_api(prompt)
-            self.data['indicators']['economic_commentary'] = response_json.get('response', 'AI解説の生成に失敗しました。')
 
-        except Exception as e:
-            logger.error(f"Failed to generate economic indicators commentary: {e}")
-            self.data['indicators']['economic_commentary'] = "経済指標のAI解説生成中にエラーが発生しました。"
+            # Distribute results
+            self.data['market']['ai_commentary'] = response_json.get('market_commentary', '生成失敗')
+            self.data['news'] = response_json.get('news_analysis', {'summary': '生成失敗', 'topics': []})
 
-        # --- Part 2: Earnings Announcements ---
-        try:
-            # 1. Filter for US earnings only
-            us_earnings = self.data.get("indicators", {}).get("us_earnings", [])
+            # Heatmaps
+            if 'sp500_heatmap' not in self.data: self.data['sp500_heatmap'] = {}
+            self.data['sp500_heatmap']['ai_commentary'] = response_json.get('sp500_commentary', '生成失敗')
 
-            if not us_earnings:
-                self.data['indicators']['earnings_commentary'] = "なし"
+            if 'nasdaq_heatmap' not in self.data: self.data['nasdaq_heatmap'] = {}
+            self.data['nasdaq_heatmap']['ai_commentary'] = response_json.get('nasdaq_commentary', '生成失敗')
+
+            # Indicators
+            self.data['indicators']['economic_commentary'] = response_json.get('economic_commentary', '生成失敗')
+            self.data['indicators']['earnings_commentary'] = response_json.get('earnings_commentary', '生成失敗')
+
+            # Column
+            col_data = response_json.get('column', {})
+            report_type = "weekly_report" if is_monday else "daily_report"
+            if col_data:
+                self.data['column'] = {
+                    report_type: {
+                        "title": col_data.get('title', 'AI解説'),
+                        "date": today.isoformat(),
+                        "content": col_data.get('content', '生成失敗')
+                    }
+                }
             else:
-                # 2. Sort by importance (tickers in US_TICKER_LIST are prioritized)
-                def earnings_sort_key(earning):
-                    return 0 if earning.get("ticker") in US_TICKER_LIST else 1
-                us_earnings.sort(key=earnings_sort_key)
-
-                if is_monday:
-                    # On Monday, limit to top 30 companies for the week
-                    target_earnings = us_earnings[:30]
-                    earnings_str = "\n".join([f"- {earning.get('company', '')} ({earning.get('ticker')})" for earning in target_earnings])
-                    prompt = f"""
-                    あなたはプロの金融アナリストです。以下の今週決算発表を予定している**米国の主要企業リスト**の中から、特に重要なものを**5社程度**選び出し、週間の見通しを解説してください。
-
-                    # 分析対象の主要企業 (今週決算発表、重要度順に最大30社)
-                    {earnings_str}
-
-                    # 指示
-                    1.  リストの中から、市場全体への影響が大きい、あるいは投資家の注目度が特に高い企業を**5社程度**選んでください。
-                    2.  選んだ企業について、市場がどのような期待を持っているか、そして決算結果がその期待を上回った場合／下回った場合に株価がどう反応しうるかを解説してください。
-                    3.  全体を**400字程度**にまとめ、今週の決算シーズンを展望する上でのポイントを明確にしてください。
-                    4.  解説文のみを生成してください。前置きや結びの言葉は不要です。
-
-                    # 出力形式
-                    {{
-                        "response": "ここに解説を記述"
-                    }}
-                    """
-                    max_tokens = 800
-                else:
-                    # On other days, limit to top 15 for the day
-                    target_earnings = us_earnings[:15]
-                    earnings_str = "\n".join([f"- {earning.get('company', '')} ({earning.get('ticker')})" for earning in target_earnings])
-                    prompt = f"""
-                    あなたはプロの金融アナリストです。以下の本日決算発表を予定している**米国企業リスト**の中から、注目すべきものを**3〜5社**選び、日本の個人投資家向けに解説してください。
-
-                    # 分析対象の企業 (本日決算発表、重要度順に最大15社)
-                    {earnings_str}
-
-                    # 指示
-                    1.  リストの中から、特に注目すべき企業を**3〜5社**選んでください。
-                    2.  選んだ各企業について、市場の期待（ポジティブかネガティブか、注目点など）と、決算結果によって株価がどう反応しうるかを簡潔に解説してください。
-                    3.  全体を**300字程度**にまとめてください。
-                    4.  企業ごとに改行して見やすくしてください。
-                    5.  解説文のみを生成してください。前置きや結びの言葉は不要です。
-
-                    # 出力形式
-                    {{
-                        "response": "ここに解説を記述"
-                    }}
-                    """
-                    max_tokens = 600
-
-                response_json = self._call_gemini_api(prompt)
-                self.data['indicators']['earnings_commentary'] = response_json.get('response', 'AI解説の生成に失敗しました。')
+                 self.data['column'] = { report_type: { "error": "生成失敗" } }
 
         except Exception as e:
-            logger.error(f"Failed to generate earnings commentary: {e}")
-            self.data['indicators']['earnings_commentary'] = "注目決算のAI解説生成中にエラーが発生しました。"
+            logger.error(f"Unified generation failed: {e}")
+            # Set error messages for all
+            err_msg = "AI生成中にエラーが発生しました。"
+            self.data['market']['ai_commentary'] = err_msg
+            self.data['news'] = {'summary': err_msg, 'topics': []}
+            if 'sp500_heatmap' not in self.data: self.data['sp500_heatmap'] = {}
+            self.data['sp500_heatmap']['ai_commentary'] = err_msg
+            if 'nasdaq_heatmap' not in self.data: self.data['nasdaq_heatmap'] = {}
+            self.data['nasdaq_heatmap']['ai_commentary'] = err_msg
+            self.data['indicators']['economic_commentary'] = err_msg
+            self.data['indicators']['earnings_commentary'] = err_msg
+            report_type = "weekly_report" if is_monday else "daily_report"
+            self.data['column'] = { report_type: { "error": err_msg } }
 
     def cleanup_old_data(self):
         """Deletes data files older than 7 days."""
@@ -1428,38 +1177,8 @@ class MarketDataFetcher:
         with open(RAW_DATA_PATH, 'r', encoding='utf-8') as f:
             self.data = json.load(f)
 
-        # AI Generation Steps
-        try:
-            self.generate_market_commentary()
-        except MarketDataError as e:
-            logger.error(f"Could not generate AI commentary: {e}")
-            self.data['market']['ai_commentary'] = "現在、AI解説に不具合が生じております。"
-
-        try:
-            self.generate_news_analysis()
-        except MarketDataError as e:
-            logger.error(f"Could not generate AI news: {e}")
-            self.data['news'] = {"summary": f"Error: {e}", "topics": []}
-
-        try:
-            self.generate_heatmap_commentary()
-        except MarketDataError as e:
-            logger.error(f"Could not generate heatmap AI commentary: {e}")
-            self.data['sp500_heatmap']['ai_commentary'] = f"Error: {e}"
-            self.data['nasdaq_heatmap']['ai_commentary'] = f"Error: {e}"
-
-        try:
-            self.generate_indicators_commentary()
-        except MarketDataError as e:
-            logger.error(f"Could not generate indicators AI commentary: {e}")
-            self.data['indicators']['economic_commentary'] = f"Error: {e}"
-            self.data['indicators']['earnings_commentary'] = f"Error: {e}"
-
-        try:
-            self.generate_column()
-        except MarketDataError as e:
-            logger.error(f"Could not generate weekly column: {e}")
-            self.data['column'] = {}
+        # Unified AI Generation
+        self.generate_unified_report()
 
         jst = timezone(timedelta(hours=9))
         self.data['date'] = datetime.now(jst).strftime('%Y-%m-%d')
