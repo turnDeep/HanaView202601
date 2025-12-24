@@ -1432,3 +1432,21 @@ body {
     margin-right: 15px;
     font-weight: 500;
 }
+.current-price-level .price-value {
+    color: #2196F3; /* Blue or neutral strong color */
+    font-size: 1.1em; /* Slightly larger */
+}
+
+/* Ensure borders separate the three items properly */
+.level-item {
+    border-right: 1px solid #ddd;
+}
+
+.level-item:last-child {
+    border-right: none;
+}
+
+/* Override previous specific class if it conflicts */
+.level-item.stop-loss {
+    border-right: 1px solid #ddd;
+}

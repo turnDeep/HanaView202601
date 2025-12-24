@@ -1357,7 +1357,6 @@ class AlgoManager {
                 <div class="top-pick-header">
                     <span class="top-pick-rank" style="background-color: ${rankColor}; color: ${index === 0 ? '#000' : '#fff'}">#${index + 1}</span>
                     <span class="top-pick-ticker">${pick.ticker}</span>
-                    ${pick.current_price ? `<span class="top-pick-price">現在値: $${pick.current_price}</span>` : ''}
                     <span class="top-pick-rr">RR ${pick.risk_reward || '-'}</span>
                 </div>
                 <div class="top-pick-body">
@@ -1366,6 +1365,10 @@ class AlgoManager {
                         <div class="level-item stop-loss">
                             <span class="level-label">損切り</span>
                             <span class="level-value">${pick.stop_loss}</span>
+                        </div>
+                        <div class="level-item current-price-level">
+                            <span class="level-label">現在値</span>
+                            <span class="level-value price-value">${pick.current_price ? '$' + pick.current_price : '-'}</span>
                         </div>
                         <div class="level-item take-profit">
                             <span class="level-label">利確</span>
