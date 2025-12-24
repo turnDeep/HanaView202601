@@ -283,16 +283,18 @@ class AlgoScanner:
                     ticker = symbol_data['ticker']
                     if ticker not in unique_symbols:
                         # 必要なデータのみ抽出
+                        ai_strategy = symbol_data.get('analysis_data', {}).get('ai_strategy', {})
                         unique_symbols[ticker] = {
                             "ticker": ticker,
                             "screener": screener_key,
+                            "price": ai_strategy.get('Price', 'N/A'),
                             "volatility_regime": symbol_data.get('volatility_regime'),
                             "gamma_flip": symbol_data.get('gamma_flip'),
                             "expected_move_30d": symbol_data.get('expected_move_30d'),
                             # 前段で生成されたAI解説を含める
                             "ai_commentary": symbol_data.get('gemini_analysis', ''),
                             # AI戦略データ
-                            "ai_strategy": symbol_data.get('analysis_data', {}).get('ai_strategy', {}),
+                            "ai_strategy": ai_strategy,
                         }
                     else:
                         # 複数スクリーナーにヒットした場合はタグを追加するなどの処理が可能だが、今回はシンプルにスキップ
@@ -317,6 +319,7 @@ class AlgoScanner:
 2. ボラティリティ・レジーム、ガンマ・フリップ、期待変動率などを考慮し、リスクリワードが良い銘柄を優先してください。
 3. 各銘柄について、以下の項目を具体的に示してください。
     - **選定理由**: なぜこの銘柄がチャンスなのか（テクニカル/オプション視点）
+    - **現在の株価**: 提供されたデータ内の価格を使用
     - **損切りライン**: 具体的な価格または条件
     - **利確ライン**: 具体的な価格目標
     - **リスクリワード**: 現状の比率（例: 1:2.5）
@@ -327,6 +330,7 @@ class AlgoScanner:
 [
   {{
     "ticker": "AAPL",
+    "current_price": "155.40",
     "reason": "解説テキスト...",
     "stop_loss": "150ドル割れ",
     "take_profit": "165ドル付近",

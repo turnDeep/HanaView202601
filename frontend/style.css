@@ -1426,3 +1426,9 @@ body {
         font-size: 0.85em;
     }
 }
+.top-pick-price {
+    font-size: 0.95em;
+    color: #444;
+    margin-right: 15px;
+    font-weight: 500;
+}
