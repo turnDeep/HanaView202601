@@ -687,6 +687,113 @@ class IBDDataCollector:
         except:
             return None
 
+    # ==================== Industry Group RS 計算 ====================
+
+    def calculate_and_store_industry_group_rs(self, tickers_list: List[str] = None):
+        """
+        全銘柄のIndustry Group RSを計算してDBに保存
+        計算式: (3ヶ月変動率*0.4 + 6ヶ月変動率*0.2 + 9ヶ月変動率*0.2 + 12ヶ月変動率*0.2)
+
+        Args:
+            tickers_list: ティッカーリスト（Noneの場合はDB内の全銘柄）
+        """
+        if tickers_list is None:
+            tickers_list = self.db.get_all_tickers()
+
+        # Ranking Scope Correction:
+        # ランキング計算は常に市場全体（DB内の全銘柄）を対象に行う必要があります。
+        # 部分的な更新であっても、産業グループ全体のスコアは全構成銘柄から算出されるべきだからです。
+        all_tickers = self.db.get_all_tickers()
+        print(f"\nIndustry Group RSを計算中（全銘柄対象: {len(all_tickers)} 銘柄）...")
+
+        # 1. 銘柄ごとのパフォーマンスデータを収集
+        # 各産業グループごとのパフォーマンスリストを作成: { 'IndustryName': [score1, score2, ...] }
+        industry_scores = {}
+        ticker_industries = {}
+
+        count = 0
+        for idx, ticker in enumerate(all_tickers):
+            if (idx + 1) % 500 == 0:
+                print(f"  進捗: {idx + 1}/{len(all_tickers)} 銘柄 (データ収集中)")
+
+            # プロファイルから産業を取得
+            profile = self.db.get_company_profile(ticker)
+            if not profile or not profile.get('industry'):
+                continue
+
+            industry = profile.get('industry')
+            sector = profile.get('sector', 'Unknown')
+            ticker_industries[ticker] = {'industry': industry, 'sector': sector}
+
+            # 株価データを取得
+            prices_df = self.db.get_price_history(ticker, days=400) # 1年分以上
+            if prices_df is None or len(prices_df) < 252:
+                continue
+
+            try:
+                close = prices_df['close'].values
+                # 変動率を計算 (3m=63d, 6m=126d, 9m=189d, 12m=252d)
+                # インデックスは後ろから取得 (最新が-1)
+
+                chg_3m = (close[-1] / close[-63] - 1) * 100 if len(close) >= 63 and close[-63] != 0 else 0
+                chg_6m = (close[-1] / close[-126] - 1) * 100 if len(close) >= 126 and close[-126] != 0 else 0
+                chg_9m = (close[-1] / close[-189] - 1) * 100 if len(close) >= 189 and close[-189] != 0 else 0
+                chg_12m = (close[-1] / close[-252] - 1) * 100 if len(close) >= 252 and close[-252] != 0 else 0
+
+                # IBD式スコア計算
+                weighted_score = (chg_3m * 0.4) + (chg_6m * 0.2) + (chg_9m * 0.2) + (chg_12m * 0.2)
+
+                if industry not in industry_scores:
+                    industry_scores[industry] = []
+                industry_scores[industry].append(weighted_score)
+
+            except Exception:
+                continue
+
+        # 2. 産業ごとの平均スコアを計算してランク付け
+        industry_avg_scores = {}
+        for industry, scores in industry_scores.items():
+            if len(scores) > 0:
+                # 外れ値の影響を減らすため、中央値を使用することも検討できるが、今回は平均を使用
+                industry_avg_scores[industry] = np.mean(scores)
+
+        # スコアでソートしてランク付け (A-E)
+        sorted_industries = sorted(industry_avg_scores.items(), key=lambda x: x[1], reverse=True)
+        total_industries = len(sorted_industries)
+
+        industry_ranks = {} # Industry -> Percentile (0-99)
+
+        if total_industries > 0:
+            for i, (ind, score) in enumerate(sorted_industries):
+                # 上位ほど高いランク値 (99が最高)
+                rank_val = 99 - (i / total_industries * 99)
+                industry_ranks[ind] = rank_val
+
+        print(f"  {total_industries} の産業グループをランク付けしました")
+
+        # 3. データベースに保存
+        save_count = 0
+        for ticker, info in ticker_industries.items():
+            industry = info['industry']
+            sector = info['sector']
+
+            # この銘柄の産業ランク値
+            rank_val = industry_ranks.get(industry, 0)
+
+            # DBに保存
+            # stock_rs_value, sector_rs_value は今回は簡易的に0またはrank_valと同じとする
+            self.db.insert_industry_group_rs(
+                ticker=ticker,
+                sector=sector,
+                industry=industry,
+                stock_rs_value=0, # 個別のスコアは別途計算済みRS値があるため省略
+                sector_rs_value=0,
+                industry_group_rs_value=rank_val
+            )
+            save_count += 1
+
+        print(f"  {save_count} 銘柄にIndustry Group RSを割り当てました\n")
+
     # ==================== レーティング計算と保存 ====================
 
     def calculate_and_store_ratings(self):
@@ -696,6 +803,7 @@ class IBDDataCollector:
         rs_values = self.db.get_all_rs_values()
         eps_components = self.db.get_all_eps_components()
         smr_components = self.db.get_all_smr_components()
+        industry_rs_values = self.db.get_all_industry_group_rs() # 追加
         tickers = self.db.get_all_tickers()
 
         # --- RS Rating ---
@@ -766,6 +874,9 @@ class IBDDataCollector:
             comp_score = (rs_rank * 2 + eps_rank * 2 + smr_score + ad_score) / 6
             comp_rating = int(comp_score)
 
+            # Industry RSを取得
+            ind_rs = industry_rs_values.get(ticker, 0)
+
             self.db.insert_calculated_rating(
                 ticker,
                 rs_rating=rs_rank,
@@ -774,7 +885,7 @@ class IBDDataCollector:
                 smr_rating=smr_r,
                 comp_rating=comp_rating,
                 price_vs_52w_high=0, # 後で更新
-                industry_group_rs=0
+                industry_group_rs=ind_rs # 反映
             )
             count += 1
 
@@ -862,10 +973,13 @@ class IBDDataCollector:
         # 7. SMR要素計算
         self.calculate_and_store_smr_components(collected_tickers)
 
-        # 8. レーティング計算
+        # 8. Industry Group RS計算
+        self.calculate_and_store_industry_group_rs(collected_tickers)
+
+        # 9. レーティング計算
         self.calculate_and_store_ratings()
 
-        # 9. 統計表示
+        # 10. 統計表示
         self.db.get_database_stats()
 
         print(f"\n{'='*80}")
