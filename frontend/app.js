@@ -482,8 +482,9 @@ async function showDashboard() {
     function initTabs() {
         const tabContainer = document.querySelector('.tab-container');
         tabContainer.addEventListener('click', (e) => {
-            if (!e.target.matches('.tab-button')) return;
-            const targetTab = e.target.dataset.tab;
+            const button = e.target.closest('.tab-button');
+            if (!button) return;
+            const targetTab = button.dataset.tab;
 
             document.querySelectorAll('.tab-button').forEach(b => b.classList.toggle('active', b.dataset.tab === targetTab));
             document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === `${targetTab}-content`));
@@ -1316,7 +1317,66 @@ class AlgoManager {
         // renderSummaryStatsは削除（タイトルとカードを削除）
         // this.renderSummaryStats(container);
 
+        // Top Picks Rendering
+        this.renderTopPicks();
+
         this.renderSymbolList(container);
+    }
+
+    renderTopPicks() {
+        const container = document.getElementById('algo-top-picks');
+        if (!container) return;
+
+        container.innerHTML = '';
+
+        const { top_picks } = this.summaryData;
+        if (!top_picks || top_picks.length === 0) {
+            // データがない場合は表示しない（またはメッセージ）
+            return;
+        }
+
+        const title = document.createElement('h3');
+        title.className = 'top-picks-title';
+        title.textContent = '🏆 本日のAI厳選 TOP5';
+        container.appendChild(title);
+
+        const listDiv = document.createElement('div');
+        listDiv.className = 'top-picks-list';
+
+        top_picks.forEach((pick, index) => {
+            const card = document.createElement('div');
+            card.className = 'top-pick-card';
+
+            // 順位バッジの色
+            let rankColor = '#444';
+            if (index === 0) rankColor = '#FFD700'; // Gold
+            else if (index === 1) rankColor = '#C0C0C0'; // Silver
+            else if (index === 2) rankColor = '#CD7F32'; // Bronze
+
+            card.innerHTML = `
+                <div class="top-pick-header">
+                    <span class="top-pick-rank" style="background-color: ${rankColor}; color: ${index === 0 ? '#000' : '#fff'}">#${index + 1}</span>
+                    <span class="top-pick-ticker">${pick.ticker}</span>
+                    <span class="top-pick-rr">RR ${pick.risk_reward || '-'}</span>
+                </div>
+                <div class="top-pick-body">
+                    <p class="top-pick-reason">${pick.reason}</p>
+                    <div class="top-pick-levels">
+                        <div class="level-item stop-loss">
+                            <span class="level-label">損切り</span>
+                            <span class="level-value">${pick.stop_loss}</span>
+                        </div>
+                        <div class="level-item take-profit">
+                            <span class="level-label">利確</span>
+                            <span class="level-value">${pick.take_profit}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+            listDiv.appendChild(card);
+        });
+
+        container.appendChild(listDiv);
     }
 
     // renderSummaryStats removed
@@ -1637,7 +1697,8 @@ if (document.getElementById('algo-content')) {
 
 // Also hook into tab switching to load data on first view
 document.querySelector('.tab-container').addEventListener('click', (e) => {
-    if (e.target.dataset.tab === 'algo' && window.algoManager) {
+    const button = e.target.closest('.tab-button');
+    if (button && button.dataset.tab === 'algo' && window.algoManager) {
         if (!window.algoManager.summaryData) {
             window.algoManager.loadData();
         }

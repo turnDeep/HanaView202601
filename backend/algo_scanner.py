@@ -111,12 +111,16 @@ class AlgoScanner:
 
             summary[screener_key] = analyzed_symbols
 
+        # 2.5 Top 5 AI Picksの生成
+        top_picks = await self.generate_top_picks(summary)
+
         # 3. サマリーを保存
         summary_data = {
             'scan_date': datetime.now().strftime('%Y-%m-%d'),
             'scan_time': datetime.now().strftime('%H:%M:%S'),
             'total_scanned': sum(len(symbols) for symbols in summary.values()),
             'summary': summary,
+            'top_picks': top_picks,
             'volatility_distribution': volatility_distribution,
             'updated_at': datetime.now().isoformat()
         }
@@ -264,6 +268,92 @@ class AlgoScanner:
         except Exception as e:
             logger.error(f"Error generating batch Gemini analysis: {e}")
             return {}
+
+    async def generate_top_picks(self, summary_data: Dict[str, List[Dict]]) -> List[Dict]:
+        """
+        全スクリーナー結果からGeminiでTOP5を選定・解説
+        """
+        try:
+            logger.info("Generating Top 5 AI Picks...")
+
+            # 全銘柄データを収集（重複排除）
+            unique_symbols = {}
+            for screener_key, symbols_list in summary_data.items():
+                for symbol_data in symbols_list:
+                    ticker = symbol_data['ticker']
+                    if ticker not in unique_symbols:
+                        # 必要なデータのみ抽出
+                        unique_symbols[ticker] = {
+                            "ticker": ticker,
+                            "screener": screener_key,
+                            "volatility_regime": symbol_data.get('volatility_regime'),
+                            "gamma_flip": symbol_data.get('gamma_flip'),
+                            "expected_move_30d": symbol_data.get('expected_move_30d'),
+                            # 前段で生成されたAI解説を含める
+                            "ai_commentary": symbol_data.get('gemini_analysis', ''),
+                            # AI戦略データ
+                            "ai_strategy": symbol_data.get('analysis_data', {}).get('ai_strategy', {}),
+                        }
+                    else:
+                        # 複数スクリーナーにヒットした場合はタグを追加するなどの処理が可能だが、今回はシンプルにスキップ
+                        pass
+
+            if not unique_symbols:
+                return []
+
+            # リスト化
+            candidates = list(unique_symbols.values())
+
+            prompt = f"""
+あなたは高度なオプション取引とテクニカル分析の専門家です。
+以下の候補銘柄リスト（各銘柄には事前のAI分析結果が含まれています）から、
+本日最もトレードチャンスがあると思われる**TOP 5銘柄**を選定してください。
+
+【候補銘柄リスト】
+{json.dumps(candidates, ensure_ascii=False, indent=2)}
+
+【指示】
+1. オプション初心者にもわかりやすく、かつテクニカルトレーダーが納得する論理的な解説を行ってください。
+2. ボラティリティ・レジーム、ガンマ・フリップ、期待変動率などを考慮し、リスクリワードが良い銘柄を優先してください。
+3. 各銘柄について、以下の項目を具体的に示してください。
+    - **選定理由**: なぜこの銘柄がチャンスなのか（テクニカル/オプション視点）
+    - **損切りライン**: 具体的な価格または条件
+    - **利確ライン**: 具体的な価格目標
+    - **リスクリワード**: 現状の比率（例: 1:2.5）
+
+【出力形式】
+**必ず以下のJSON配列形式**のみで出力してください。Markdownのコードブロックは不要です。
+
+[
+  {{
+    "ticker": "AAPL",
+    "reason": "解説テキスト...",
+    "stop_loss": "150ドル割れ",
+    "take_profit": "165ドル付近",
+    "risk_reward": "1:3"
+  }},
+  ...
+]
+"""
+            response_text = gemini_client.generate_content(prompt)
+
+            if not response_text:
+                logger.error("Empty response from Gemini for Top Picks")
+                return []
+
+            clean_text = response_text.replace('```json', '').replace('```', '').strip()
+            top_picks = json.loads(clean_text)
+
+            # リスト形式であることを確認
+            if isinstance(top_picks, list):
+                return top_picks[:5] # 念のため5件に制限
+            else:
+                logger.error("Gemini response format error: Not a list")
+                return []
+
+        except Exception as e:
+            logger.error(f"Error generating Top Picks: {e}")
+            return []
 
 # グローバルインスタンス
 algo_scanner = AlgoScanner()
