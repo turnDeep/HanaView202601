@@ -41,6 +41,7 @@ class IBDScreeners:
                 'price': close[-1],
                 'pct_change_1d': ((close[-1] - close[-2]) / close[-2] * 100) if close[-2] != 0 else 0,
                 'change_from_open': ((close[-1] - open_price[-1]) / open_price[-1] * 100) if open_price[-1] != 0 else 0,
+                'pct_1w': ((close[-1] - close[-6]) / close[-6] * 100) if len(close) >= 6 and close[-6] != 0 else None,
                 'pct_1m': ((close[-1] - close[-21]) / close[-21] * 100) if len(close) >= 21 and close[-21] != 0 else None,
                 'pct_3m': ((close[-1] - close[-63]) / close[-63] * 100) if len(close) >= 63 and close[-63] != 0 else None,
                 'pct_6m': ((close[-1] - close[-126]) / close[-126] * 100) if len(close) >= 126 and close[-126] != 0 else None
@@ -227,9 +228,9 @@ class IBDScreeners:
         Momentum 97 スクリーナー
 
         条件:
+        - 1W Rank (Pct) ≥ 97%
         - 1M Rank (Pct) ≥ 97%
         - 3M Rank (Pct) ≥ 97%
-        - 6M Rank (Pct) ≥ 97%
         """
         print("\n=== Momentum 97 スクリーナー実行中 ===")
 
@@ -239,11 +240,12 @@ class IBDScreeners:
         # 全銘柄のパフォーマンスを取得
         for ticker in tickers_list:
             price_metrics = self.get_price_metrics(ticker)
-            if price_metrics and price_metrics['pct_1m'] is not None and price_metrics['pct_3m'] is not None and price_metrics['pct_6m'] is not None:
+            # Ensure we have data for 1W, 1M, and 3M
+            if price_metrics and price_metrics.get('pct_1w') is not None and price_metrics.get('pct_1m') is not None and price_metrics.get('pct_3m') is not None:
                 performance_data[ticker] = {
+                    '1w': price_metrics['pct_1w'],
                     '1m': price_metrics['pct_1m'],
-                    '3m': price_metrics['pct_3m'],
-                    '6m': price_metrics['pct_6m']
+                    '3m': price_metrics['pct_3m']
                 }
 
         # 各期間でパーセンタイルランクを計算
@@ -255,16 +257,16 @@ class IBDScreeners:
             total = len(sorted_items)
             return {t: ((idx + 1) / total) * 100 for idx, (t, v) in enumerate(sorted_items)}
 
+        rank_1w = calc_percentile_ranks(performance_data, '1w')
         rank_1m = calc_percentile_ranks(performance_data, '1m')
         rank_3m = calc_percentile_ranks(performance_data, '3m')
-        rank_6m = calc_percentile_ranks(performance_data, '6m')
 
         # フィルタリング
         passed = []
         for ticker in performance_data.keys():
-            if (rank_1m.get(ticker, 0) >= 97 and
-                rank_3m.get(ticker, 0) >= 97 and
-                rank_6m.get(ticker, 0) >= 97):
+            if (rank_1w.get(ticker, 0) >= 97 and
+                rank_1m.get(ticker, 0) >= 97 and
+                rank_3m.get(ticker, 0) >= 97):
                 passed.append(ticker)
 
         print(f"  合格: {len(passed)} 銘柄")
