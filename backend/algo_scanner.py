@@ -33,6 +33,26 @@ logger = logging.getLogger(__name__)
 # Paths
 CHARTS_ALGO_PATH = os.getenv("CHARTS_ALGO_PATH", "/app/frontend/charts/algo")
 
+# Metric Descriptions for Gemini Prompt
+METRIC_DESCRIPTIONS = {
+    "momentum_rank_1w": "1週間モメンタムランク (0-100)",
+    "momentum_rank_1m": "1ヶ月モメンタムランク (0-100)",
+    "momentum_rank_3m": "3ヶ月モメンタムランク (0-100)",
+    "rs_rating": "RS Rating (IBD相対強度, 1-99, 99が最強)",
+    "rs_sts_percentile": "RS STS Percentile (短期相対強度パーセンタイル, 0-100)",
+    "eps_growth_last_qtr": "最新四半期EPS成長率(%)",
+    "avg_vol_50": "50日平均出来高",
+    "price_vs_50ma": "50日移動平均乖離率(%)",
+    "price_change_pct": "前日比騰落率(%)",
+    "vol_change_pct": "出来高変化率(%)",
+    "rel_volume": "相対出来高 (Relative Volume)",
+    "comp_rating": "Composite Rating (IBD総合評価, 1-99)",
+    "ad_rating": "A/D Rating (機関投資家売買動向, A=買い集め, E=売り抜け)",
+    "gamma_flip": "ガンマフリップレベル (市場のボラティリティ性質が変わる価格分岐点)",
+    "volatility_regime": "ボラティリティ環境 (contraction=収縮/transition=移行/expansion=拡大)",
+    "expected_move_30d": "30日予想変動幅(%)"
+}
+
 class AlgoScanner:
     def __init__(self):
         self.data_manager = AlgoDataManager()
@@ -275,14 +295,21 @@ class AlgoScanner:
 
                 prompt_data.append(p_item)
 
+            # Definitions for the prompt
+            definitions_text = "\n".join([f"- {k}: {v}" for k, v in METRIC_DESCRIPTIONS.items()])
+
             prompt = f"""
 あなたはプロの株式トレーダーです。以下の銘柄リスト（スクリーナー: {screener_key}）について、各銘柄の分析とトレーディング戦略を日本語で作成してください。
 
 【入力データ】
 {json.dumps(prompt_data, ensure_ascii=False, indent=2)}
 
+【データの定義】
+入力データに含まれる主要な指標の意味は以下の通りです：
+{definitions_text}
+
 【要件】
-1. 各銘柄について、ガンマ分析とボラティリティ分析に基づいた具体的な戦略を記述すること。
+1. 各銘柄について、スクリーナー指標（Momentum, RS Rating等）とガンマ分析・ボラティリティ分析を組み合わせて、なぜその銘柄が有望かを説明すること。
 2. エントリー/エグジットレベルとリスク管理のポイントを含めること。
 3. 出力は**必ず以下のJSON形式**のみとすること。Markdownのコードブロックなどは含めないこと。
 {{
