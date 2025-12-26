@@ -1257,10 +1257,24 @@ body {
     margin-bottom: 10px;
 }
 
+.algo-ticker-wrapper {
+    display: flex;
+    flex-direction: column;
+}
+
 .algo-card-ticker {
     font-size: 1.2em;
     font-weight: bold;
     color: var(--text-primary);
+}
+
+.algo-info-text {
+    font-size: 0.8em;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px; /* Limit width on mobile */
 }
 
 .algo-card-image {
