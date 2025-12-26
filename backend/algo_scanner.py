@@ -65,13 +65,23 @@ class AlgoScanner:
         db = IBDDatabase()
 
         try:
-            for screener_key, symbols in market_data.items():
-                # symbols is list of tickers
-                logger.info(f"Analyzing screener: {screener_key} ({len(symbols)} symbols)")
+            for screener_key, items in market_data.items():
+                # items is now list of dicts: [{'ticker': 'AAPL', 'rank_1w': 99}, ...]
+                logger.info(f"Analyzing screener: {screener_key} ({len(items)} symbols)")
 
                 analyzed_symbols = []
 
-                for ticker in symbols:
+                for item in items:
+                    # Robustly handle both dict (new format) and string (old format)
+                    if isinstance(item, dict):
+                        ticker = item.get('ticker')
+                    else:
+                        ticker = str(item)
+                        item = {} # Empty dict if simple string
+
+                    if not ticker:
+                        continue
+
                     try:
                         # Fetch profile
                         profile = db.get_company_profile(ticker)
@@ -82,13 +92,13 @@ class AlgoScanner:
                         analysis_result = await self.analyze_symbol(ticker)
 
                         if analysis_result:
-                            # スクリーナー情報をマージ (symbol_data in this case is just ticker or simple dict)
-                            # We construct the object
+                            # スクリーナー情報をマージ
+                            # item (from screener) + profile + analysis_result
                             merged_data = {
-                                'ticker': ticker,
                                 'symbol': ticker, # Keep compatibility
                                 'sector': sector,
                                 'industry': industry,
+                                **item, # Include all metrics from screener
                                 **analysis_result
                             }
                             analyzed_symbols.append(merged_data)
@@ -141,11 +151,11 @@ class AlgoScanner:
 
         return summary_data
 
-    async def run_market_algox(self) -> Dict[str, List[str]]:
+    async def run_market_algox(self) -> Dict[str, List[Dict]]:
         """
         MarketAlgoXのデータ収集とスクリーニングを実行
         Returns:
-            Dict[screener_name, List[ticker]]
+            Dict[screener_name, List[Dict]]
         """
         try:
             logger.info("Running MarketAlgoX Data Collection...")
@@ -242,13 +252,28 @@ class AlgoScanner:
             # プロンプト用のデータを構築
             prompt_data = []
             for item in symbols_data:
-                prompt_data.append({
+                # Include all relevant metrics in the prompt
+                # Filter out heavy objects like 'analysis_data' to keep prompt clean, but keep specific AI strategy
+
+                # Base data for prompt
+                p_item = {
                     "ticker": item['ticker'],
                     "gamma_flip": item.get('gamma_flip'),
                     "volatility_regime": item.get('volatility_regime'),
                     "expected_move_30d": item.get('expected_move_30d'),
-                    "ai_strategy": item.get('analysis_data', {}).get('ai_strategy', {})
-                })
+                    "ai_strategy": item.get('analysis_data', {}).get('ai_strategy', {}),
+                    "sector": item.get('sector'),
+                    "industry": item.get('industry')
+                }
+
+                # Add all screener-specific metrics (keys not present in standard set)
+                standard_keys = {'ticker', 'symbol', 'gamma_flip', 'volatility_regime', 'expected_move_30d', 'analysis_data', 'gemini_analysis', 'screener_sources', 'last_updated', 'sector', 'industry'}
+
+                for k, v in item.items():
+                    if k not in standard_keys:
+                        p_item[k] = v
+
+                prompt_data.append(p_item)
 
             prompt = f"""
 あなたはプロの株式トレーダーです。以下の銘柄リスト（スクリーナー: {screener_key}）について、各銘柄の分析とトレーディング戦略を日本語で作成してください。

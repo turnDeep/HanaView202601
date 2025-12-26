@@ -223,7 +223,7 @@ class IBDScreeners:
 
     # ==================== スクリーナー実装 ====================
 
-    def screener_momentum_97(self) -> List[str]:
+    def screener_momentum_97(self) -> List[Dict]:
         """
         Momentum 97 スクリーナー
 
@@ -264,15 +264,22 @@ class IBDScreeners:
         # フィルタリング
         passed = []
         for ticker in performance_data.keys():
-            if (rank_1w.get(ticker, 0) >= 97 and
-                rank_1m.get(ticker, 0) >= 97 and
-                rank_3m.get(ticker, 0) >= 97):
-                passed.append(ticker)
+            r1 = rank_1w.get(ticker, 0)
+            r2 = rank_1m.get(ticker, 0)
+            r3 = rank_3m.get(ticker, 0)
+
+            if r1 >= 97 and r2 >= 97 and r3 >= 97:
+                passed.append({
+                    'ticker': ticker,
+                    'momentum_rank_1w': round(r1, 2),
+                    'momentum_rank_1m': round(r2, 2),
+                    'momentum_rank_3m': round(r3, 2)
+                })
 
         print(f"  合格: {len(passed)} 銘柄")
         return passed
 
-    def screener_explosive_eps_growth(self) -> List[str]:
+    def screener_explosive_eps_growth(self) -> List[Dict]:
         """
         Explosive Estimated EPS Growth Stocks スクリーナー
 
@@ -300,7 +307,8 @@ class IBDScreeners:
         for ticker, rating in all_ratings.items():
             try:
                 # RS Rating チェック
-                if rating['rs_rating'] is None or rating['rs_rating'] < 80:
+                rs_rating = rating['rs_rating']
+                if rs_rating is None or rs_rating < 80:
                     continue
 
                 # RS STS% チェック
@@ -332,14 +340,21 @@ class IBDScreeners:
                 if price_vs_50ma is None or price_vs_50ma < 0:
                     continue
 
-                passed.append(ticker)
+                passed.append({
+                    'ticker': ticker,
+                    'rs_rating': rs_rating,
+                    'rs_sts_percentile': rs_sts,
+                    'eps_growth_last_qtr': eps_growth,
+                    'avg_vol_50': vol_metrics['avg_vol_50'],
+                    'price_vs_50ma': round(price_vs_50ma, 2)
+                })
             except:
                 continue
 
         print(f"  合格: {len(passed)} 銘柄")
         return passed
 
-    def screener_up_on_volume(self) -> List[str]:
+    def screener_up_on_volume(self) -> List[Dict]:
         """
         Up on Volume List スクリーナー
 
@@ -362,7 +377,8 @@ class IBDScreeners:
         for ticker, rating in all_ratings.items():
             try:
                 # RS Rating チェック
-                if rating['rs_rating'] is None or rating['rs_rating'] < 80:
+                rs_rating = rating['rs_rating']
+                if rs_rating is None or rs_rating < 80:
                     continue
 
                 # RS STS% チェック
@@ -416,14 +432,21 @@ class IBDScreeners:
                 if eps_growth is None or eps_growth < 20:
                     continue
 
-                passed.append(ticker)
+                passed.append({
+                    'ticker': ticker,
+                    'price_change_pct': price_metrics['pct_change_1d'],
+                    'vol_change_pct': vol_metrics['vol_change_pct'],
+                    'rs_rating': rs_rating,
+                    'rs_sts_percentile': rs_sts,
+                    'eps_growth_last_qtr': eps_growth
+                })
             except:
                 continue
 
         print(f"  合格: {len(passed)} 銘柄")
         return passed
 
-    def screener_top_2_percent_rs(self) -> List[str]:
+    def screener_top_2_percent_rs(self) -> List[Dict]:
         """
         Top 2% RS Rating List スクリーナー
 
@@ -443,7 +466,8 @@ class IBDScreeners:
         for ticker, rating in all_ratings.items():
             try:
                 # RS Rating チェック
-                if rating['rs_rating'] is None or rating['rs_rating'] < 98:
+                rs_rating = rating['rs_rating']
+                if rs_rating is None or rs_rating < 98:
                     continue
 
                 # RS STS% チェック
@@ -479,14 +503,18 @@ class IBDScreeners:
                     if 'healthcare' in sector or 'medical' in sector:
                         continue
 
-                passed.append(ticker)
+                passed.append({
+                    'ticker': ticker,
+                    'rs_rating': rs_rating,
+                    'rs_sts_percentile': rs_sts
+                })
             except:
                 continue
 
         print(f"  合格: {len(passed)} 銘柄")
         return passed
 
-    def screener_4_percent_bullish_yesterday(self) -> List[str]:
+    def screener_4_percent_bullish_yesterday(self) -> List[Dict]:
         """
         4% Bullish Yesterday スクリーナー
 
@@ -551,14 +579,19 @@ class IBDScreeners:
                 if rs_sts < 80:
                     continue
 
-                passed.append(ticker)
+                passed.append({
+                    'ticker': ticker,
+                    'price_change_pct': price_metrics['pct_change_1d'],
+                    'rel_volume': vol_metrics['rel_volume'],
+                    'rs_sts_percentile': rs_sts
+                })
             except:
                 continue
 
         print(f"  合格: {len(passed)} 銘柄")
         return passed
 
-    def screener_healthy_chart_watchlist(self) -> List[str]:
+    def screener_healthy_chart_watchlist(self) -> List[Dict]:
         """
         Healthy Chart Watch List スクリーナー
 
@@ -579,11 +612,13 @@ class IBDScreeners:
         for ticker, rating in all_ratings.items():
             try:
                 # RS Rating チェック
-                if rating['rs_rating'] is None or rating['rs_rating'] < 90:
+                rs_rating = rating['rs_rating']
+                if rs_rating is None or rs_rating < 90:
                     continue
 
                 # Composite Rating チェック
-                if rating['comp_rating'] is None or rating['comp_rating'] < 80:
+                comp_rating = rating['comp_rating']
+                if comp_rating is None or comp_rating < 80:
                     continue
 
                 # A/D Rating チェック
@@ -610,7 +645,12 @@ class IBDScreeners:
                 if not vol_metrics or vol_metrics['avg_vol_50'] < 100:
                     continue
 
-                passed.append(ticker)
+                passed.append({
+                    'ticker': ticker,
+                    'rs_rating': rs_rating,
+                    'comp_rating': comp_rating,
+                    'ad_rating': rating['ad_rating']
+                })
             except:
                 continue
 
