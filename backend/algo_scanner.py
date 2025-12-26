@@ -21,6 +21,7 @@ from .algo_data_manager import AlgoDataManager
 # Since we are inside backend package, we can use relative imports
 from .market_algo_x.ibd_screeners import IBDScreeners
 from .market_algo_x.ibd_data_collector import IBDDataCollector
+from .market_algo_x.ibd_database import IBDDatabase
 
 # Import StageAlgo modules
 from .stage_algo.gamma_plotter import GammaPlotter
@@ -60,56 +61,69 @@ class AlgoScanner:
         summary = {}
         volatility_distribution = {"contraction": 0, "transition": 0, "expansion": 0}
 
-        for screener_key, symbols in market_data.items():
-            # symbols is list of tickers
-            logger.info(f"Analyzing screener: {screener_key} ({len(symbols)} symbols)")
+        # Initialize Database connection for profile fetching
+        db = IBDDatabase()
 
-            analyzed_symbols = []
+        try:
+            for screener_key, symbols in market_data.items():
+                # symbols is list of tickers
+                logger.info(f"Analyzing screener: {screener_key} ({len(symbols)} symbols)")
 
-            for ticker in symbols:
-                try:
-                    # StageAlgoで分析
-                    analysis_result = await self.analyze_symbol(ticker)
+                analyzed_symbols = []
 
-                    if analysis_result:
-                        # スクリーナー情報をマージ (symbol_data in this case is just ticker or simple dict)
-                        # We construct the object
-                        merged_data = {
-                            'ticker': ticker,
-                            'symbol': ticker, # Keep compatibility
-                            **analysis_result
-                        }
-                        analyzed_symbols.append(merged_data)
+                for ticker in symbols:
+                    try:
+                        # Fetch profile
+                        profile = db.get_company_profile(ticker)
+                        sector = profile.get('sector', 'Unknown') if profile else 'Unknown'
+                        industry = profile.get('industry', 'Unknown') if profile else 'Unknown'
 
+                        # StageAlgoで分析
+                        analysis_result = await self.analyze_symbol(ticker)
+
+                        if analysis_result:
+                            # スクリーナー情報をマージ (symbol_data in this case is just ticker or simple dict)
+                            # We construct the object
+                            merged_data = {
+                                'ticker': ticker,
+                                'symbol': ticker, # Keep compatibility
+                                'sector': sector,
+                                'industry': industry,
+                                **analysis_result
+                            }
+                            analyzed_symbols.append(merged_data)
                         # ボラティリティ分布を集計
                         regime = analysis_result.get('volatility_regime', 'transition')
                         volatility_distribution[regime] = volatility_distribution.get(regime, 0) + 1
 
-                except Exception as e:
-                    logger.error(f"Error analyzing {ticker}: {e}")
-                    continue
+                    except Exception as e:
+                        logger.error(f"Error analyzing {ticker}: {e}")
+                        continue
 
-            # バッチでGemini解説を生成
-            if analyzed_symbols:
-                gemini_results = await self.generate_batch_gemini_analysis(screener_key, analyzed_symbols)
+                # バッチでGemini解説を生成
+                if analyzed_symbols:
+                    gemini_results = await self.generate_batch_gemini_analysis(screener_key, analyzed_symbols)
 
-                # 結果を統合して保存
-                for symbol_data in analyzed_symbols:
-                    ticker = symbol_data['ticker']
-                    gemini_analysis = gemini_results.get(ticker)
+                    # 結果を統合して保存
+                    for symbol_data in analyzed_symbols:
+                        ticker = symbol_data['ticker']
+                        gemini_analysis = gemini_results.get(ticker)
 
-                    # リスト内のデータにも解説を追加（フロントエンド表示用）
-                    symbol_data['gemini_analysis'] = gemini_analysis
+                        # リスト内のデータにも解説を追加（フロントエンド表示用）
+                        symbol_data['gemini_analysis'] = gemini_analysis
 
-                    # 個別銘柄データを保存
-                    self.data_manager.save_symbol_data(ticker, {
-                        **symbol_data,
-                        'gemini_analysis': gemini_analysis,
-                        'screener_sources': [screener_key],
-                        'last_updated': datetime.now().isoformat()
-                    })
+                        # 個別銘柄データを保存
+                        self.data_manager.save_symbol_data(ticker, {
+                            **symbol_data,
+                            'gemini_analysis': gemini_analysis,
+                            'screener_sources': [screener_key],
+                            'last_updated': datetime.now().isoformat()
+                        })
 
-            summary[screener_key] = analyzed_symbols
+                summary[screener_key] = analyzed_symbols
+        finally:
+            if 'db' in locals():
+                db.close()
 
         # 3. サマリーを保存
         summary_data = {
@@ -274,4 +288,18 @@ async def run_algo_scan() -> Dict:
 
 async def analyze_single_ticker_algo(ticker: str) -> Optional[Dict]:
     """単一銘柄を分析（検索機能用）"""
-    return await algo_scanner.analyze_symbol(ticker)
+    result = await algo_scanner.analyze_symbol(ticker)
+    if result:
+         db = None
+         try:
+             db = IBDDatabase()
+             profile = db.get_company_profile(ticker)
+             if profile:
+                 result['sector'] = profile.get('sector')
+                 result['industry'] = profile.get('industry')
+         except Exception as e:
+             logger.error(f"Error fetching profile for {ticker}: {e}")
+         finally:
+             if db:
+                 db.close()
+    return result

@@ -1366,9 +1366,16 @@ class AlgoManager {
             (typeof item.gemini_analysis === 'string' ? item.gemini_analysis : JSON.stringify(item.gemini_analysis))
             : 'AI解説なし';
 
+        // Sector/Industry Info
+        const sectorInfo = (item.sector && item.sector !== 'Unknown') ? item.sector : '-';
+        const industryInfo = (item.industry && item.industry !== 'Unknown') ? item.industry : '-';
+
         itemDiv.innerHTML = `
             <div class="algo-card-header">
-                 <span class="algo-card-ticker">${item.symbol}</span>
+                 <div class="algo-ticker-wrapper">
+                     <span class="algo-card-ticker">${item.symbol}</span>
+                     <span class="algo-info-text">${sectorInfo} / ${industryInfo}</span>
+                 </div>
                  <span class="status-dot" style="background-color: ${regimeColor};"></span>
             </div>
             <div class="algo-card-image">
