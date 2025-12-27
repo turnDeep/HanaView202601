@@ -482,11 +482,20 @@ async function showDashboard() {
     function initTabs() {
         const tabContainer = document.querySelector('.tab-container');
         tabContainer.addEventListener('click', (e) => {
-            if (!e.target.matches('.tab-button')) return;
-            const targetTab = e.target.dataset.tab;
+            const button = e.target.closest('.tab-button');
+            if (!button) return;
 
-            document.querySelectorAll('.tab-button').forEach(b => b.classList.toggle('active', b.dataset.tab === targetTab));
-            document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === `${targetTab}-content`));
+            const targetTab = button.dataset.tab;
+
+            document.querySelectorAll('.tab-button').forEach(b => {
+                const isActive = b.dataset.tab === targetTab;
+                b.classList.toggle('active', isActive);
+            });
+
+            document.querySelectorAll('.tab-pane').forEach(p => {
+                const isActive = p.id === `${targetTab}-content`;
+                p.classList.toggle('active', isActive);
+            });
 
             if (targetTab === 'hwb200' && window.hwb200Manager) {
                 window.hwb200Manager.loadData();
@@ -1260,6 +1269,8 @@ class AlgoManager {
                     this.searchTicker();
                 }
             });
+        } else {
+            console.error('Search button not found: algo-analyze-btn');
         }
     }
 
@@ -1321,9 +1332,15 @@ class AlgoManager {
 
     // renderSummaryStats removed
 
-    renderSymbolList(container) {
-        const { summary } = this.summaryData;
-        const screenerData = summary[this.activeScreener] || [];
+    renderSymbolList(container, data = null) {
+        let screenerData;
+
+        if (data) {
+            screenerData = data;
+        } else {
+            const { summary } = this.summaryData;
+            screenerData = summary[this.activeScreener] || [];
+        }
 
         if (screenerData.length === 0) {
             container.innerHTML += '<p class="no-data">このスクリーナーには該当銘柄がありません。</p>';
@@ -1528,13 +1545,46 @@ class AlgoManager {
 
         this.showStatus(`${ticker}のデータを検索中...`, 'info');
 
+        // まず、ロード済みのスクリーナー結果から検索
+        if (this.summaryData && this.summaryData.summary) {
+            const allItems = [];
+            const seenSymbols = new Set();
+
+            // すべてのスクリーナーを走査
+            for (const screenerKey in this.summaryData.summary) {
+                const items = this.summaryData.summary[screenerKey];
+                for (const item of items) {
+                    if (item.symbol === ticker && !seenSymbols.has(item.symbol)) {
+                        allItems.push(item);
+                        seenSymbols.add(item.symbol);
+                    }
+                }
+            }
+
+            if (allItems.length > 0) {
+                // 見つかった場合、リスト表示
+                const container = document.getElementById('algo-content-area');
+                container.innerHTML = '';
+                this.renderSymbolList(container, allItems);
+
+                const searchBtn = document.getElementById('algo-analyze-btn');
+                if (searchBtn) {
+                    searchBtn.textContent = 'リセット';
+                    searchBtn.dataset.state = 'reset';
+                }
+                this.showStatus(`✅ ${ticker}が当日のスクリーニングで見つかりました`, 'info');
+                return;
+            }
+        }
+
+        // スクリーナーに見つからなかった場合、サーバーに問い合わせる（既存の挙動）
         try {
             // Check cache first (force=false)
             const response = await fetchWithAuth(`/api/algo/analyze_ticker?ticker=${ticker}&force=false`);
 
             if (!response.ok) {
                 if (response.status === 404) {
-                    const shouldAnalyze = confirm(`${ticker}はスクリーナーに含まれていません。\n新規に分析を実行しますか？（30秒ほどかかります）`);
+                    const shouldAnalyze = confirm(`${ticker}は本日のスクリーナーに含まれていません。\n新規に分析を実行しますか？（30秒ほどかかります）`);
                     if (shouldAnalyze) {
                         await this.forceAnalyzeTicker(ticker);
                     } else {

@@ -595,14 +595,36 @@ async def analyze_ticker_algo(ticker: str, force: bool = False, payload: dict = 
                 detail=f"{symbol}の分析に失敗しました"
             )
 
-        # スクリーナーに含まれていないため、Gemini解説なし
+        # スクリーナーに含まれていないため、計算された指標を解説の代わりに表示
+        regime_map = {
+            'contraction': '収縮 (凪)',
+            'transition': '移行 (通常)',
+            'expansion': '拡大 (嵐)'
+        }
+
+        regime = analysis_result.get('volatility_regime', 'unknown')
+        regime_jp = regime_map.get(regime, regime)
+
+        metrics_text = "【分析結果サマリー】\n"
+        metrics_text += f"・ボラティリティ環境: {regime_jp}\n"
+        metrics_text += f"・Gamma Flip: {analysis_result.get('gamma_flip', 'N/A')}\n"
+
+        move = analysis_result.get('expected_move_30d')
+        if move:
+             metrics_text += f"・30日予想変動幅: ±{move}%\n"
+
+        if analysis_result.get('sector'):
+             metrics_text += f"・セクター: {analysis_result.get('sector')}\n"
+        if analysis_result.get('industry'):
+             metrics_text += f"・業界: {analysis_result.get('industry')}\n"
+
         symbol_data = {
             'symbol': symbol,
             **analysis_result,
-            'gemini_analysis': None,
+            'gemini_analysis': metrics_text,
             'screener_sources': [],
             'metadata': {},
-            'message': 'この銘柄はスクリーナーに含まれていません。チャート分析のみ表示します。',
+            'message': 'この銘柄はスクリーナーに含まれていません。計算された指標を表示します。',
             'last_updated': datetime.now(timezone.utc).isoformat()
         }
 
