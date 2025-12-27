@@ -1269,6 +1269,8 @@ class AlgoManager {
                     this.searchTicker();
                 }
             });
+        } else {
+            console.error('Search button not found: algo-analyze-btn');
         }
     }
 
