@@ -93,8 +93,13 @@
 
             <!-- Algoタブコンテンツ -->
             <div id="algo-content" class="tab-pane">
-              <!-- ステータス表示 -->
-              <div id="algo-status" class="algo-status-info"></div>
+              <div class="hwb-controls">
+                  <input type="text" id="algo-ticker-input" class="hwb-ticker-input" placeholder="ティッカーを入力 (例: NVDA)">
+                  <button id="algo-analyze-btn" class="hwb-action-btn">
+                      検索
+                  </button>
+                  <div id="algo-status" class="algo-status-info"></div>
+              </div>
 
               <!-- スクリーナーボタン -->
               <div id="algo-screener-buttons" class="screener-buttons">
