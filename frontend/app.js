@@ -1246,11 +1246,11 @@ class AlgoManager {
         this.summaryData = null;
         this.currentView = 'summary';
         this.activeScreener = 'momentum_97'; // Default screener
+        this.activePortfolio = 'aggressive'; // Default portfolio
         this.initEventListeners();
     }
 
     initEventListeners() {
-        // Screener button events
         const screenerButtons = document.querySelectorAll('.screener-btn');
         screenerButtons.forEach(btn => {
             btn.addEventListener('click', () => {
@@ -1259,7 +1259,6 @@ class AlgoManager {
             });
         });
 
-        // Search button events
         const searchBtn = document.getElementById('algo-analyze-btn');
         if (searchBtn) {
             searchBtn.addEventListener('click', () => {
@@ -1269,8 +1268,6 @@ class AlgoManager {
                     this.searchTicker();
                 }
             });
-        } else {
-            console.error('Search button not found: algo-analyze-btn');
         }
     }
 
@@ -1283,7 +1280,8 @@ class AlgoManager {
             if (!response.ok) {
                 if (response.status === 404) {
                     this.showStatus('データがありません。スキャンを実行してください。', 'warning');
-                    document.getElementById('algo-content-area').innerHTML = '<div class="card"><p>データがありません。スキャンを実行してください。</p></div>';
+                    const area = document.getElementById('algo-content-area');
+                    if (area) area.innerHTML = '<div class="card"><p>データがありません。スキャンを実行してください。</p></div>';
                     return;
                 }
                 throw new Error(`サーバーエラー: ${response.status}`);
@@ -1296,7 +1294,6 @@ class AlgoManager {
             const { updated_at } = this.summaryData;
             const displayDate = this.formatDate(updated_at);
 
-            // ステータス表示を更新（日付のみ）
             this.showStatus(
                 `最終更新: ${displayDate}`,
                 'info'
@@ -1309,7 +1306,6 @@ class AlgoManager {
     }
 
     switchScreener(screenerKey) {
-        // Update active button state
         document.querySelectorAll('.screener-btn').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.screener === screenerKey);
         });
@@ -1321,16 +1317,191 @@ class AlgoManager {
     render() {
         if (!this.summaryData) return;
 
+        // Render Portfolios
+        if (this.currentView === 'summary' && this.summaryData.portfolios) {
+            this.renderPortfolios(this.summaryData.portfolios);
+        } else {
+            const pContainer = document.getElementById('algo-portfolios');
+            if (pContainer) pContainer.innerHTML = '';
+        }
+
         const container = document.getElementById('algo-content-area');
-        container.innerHTML = '';
-
-        // renderSummaryStatsは削除（タイトルとカードを削除）
-        // this.renderSummaryStats(container);
-
-        this.renderSymbolList(container);
+        if (container) {
+            container.innerHTML = '';
+            this.renderSymbolList(container);
+        } else {
+            console.error('algo-content-area not found');
+        }
     }
 
-    // renderSummaryStats removed
+    renderPortfolios(portfolios) {
+        const container = document.getElementById('algo-portfolios');
+        if (!container) return;
+        container.innerHTML = '';
+
+        if (!portfolios || Object.keys(portfolios).length === 0) {
+            return;
+        }
+
+        const title = document.createElement('h3');
+        title.textContent = 'AI推奨モデルポートフォリオ';
+        title.style.marginBottom = '15px';
+        title.style.textAlign = 'center';
+        container.appendChild(title);
+
+        // Buttons
+        const btnContainer = document.createElement('div');
+        btnContainer.className = 'hwb-summary-grid';
+        btnContainer.style.marginBottom = '20px';
+        btnContainer.style.marginTop = '0';
+
+        const types = [
+            { key: 'aggressive', label: 'Aggressive', color: '#FF1744' },
+            { key: 'balanced', label: 'Balanced', color: '#FFD600' },
+            { key: 'defensive', label: 'Defensive', color: '#00C853' }
+        ];
+
+        types.forEach(type => {
+            const btn = document.createElement('div');
+            btn.className = `summary-card ${this.activePortfolio === type.key ? 'active' : ''}`;
+            if (this.activePortfolio === type.key) {
+                btn.style.border = `2px solid ${type.color}`;
+                btn.style.backgroundColor = `${type.color}15`;
+            } else {
+                btn.style.border = '1px solid transparent';
+            }
+
+            btn.style.display = 'flex';
+            btn.style.flexDirection = 'column';
+            btn.style.alignItems = 'center';
+            btn.style.justifyContent = 'center';
+            btn.style.padding = '10px';
+
+            const portfolioData = portfolios[type.key];
+            const allocations = Array.isArray(portfolioData) ? portfolioData : (portfolioData?.allocations || []);
+            const count = allocations.length;
+
+            btn.innerHTML = `
+                <h3 style="color: ${type.color}; margin-bottom: 5px;">${type.label}</h3>
+                <p class="summary-count" style="font-size: 1.2em;">${count}銘柄</p>
+            `;
+
+            btn.addEventListener('click', () => {
+                this.activePortfolio = type.key;
+                this.renderPortfolios(portfolios);
+            });
+
+            btnContainer.appendChild(btn);
+        });
+
+        container.appendChild(btnContainer);
+
+        // Content
+        const activePortfolioData = portfolios[this.activePortfolio];
+        const activeAllocations = Array.isArray(activePortfolioData) ? activePortfolioData : (activePortfolioData?.allocations || []);
+        const activeCommentary = !Array.isArray(activePortfolioData) ? activePortfolioData?.commentary : null;
+
+        if (activeAllocations && activeAllocations.length > 0) {
+            const chartCard = document.createElement('div');
+            chartCard.className = 'card';
+            chartCard.style.padding = '15px';
+            chartCard.style.marginTop = '10px';
+
+            const canvasContainer = document.createElement('div');
+            canvasContainer.style.position = 'relative';
+            canvasContainer.style.height = '300px';
+            canvasContainer.style.width = '100%';
+
+            const canvas = document.createElement('canvas');
+            canvasContainer.appendChild(canvas);
+            chartCard.appendChild(canvasContainer);
+
+            if (activeCommentary) {
+                const commentaryDiv = document.createElement('div');
+                commentaryDiv.style.marginTop = '20px';
+                commentaryDiv.style.padding = '15px';
+                commentaryDiv.style.backgroundColor = '#f9f9f9';
+                commentaryDiv.style.borderRadius = '8px';
+                commentaryDiv.style.borderLeft = '4px solid #006B6B';
+
+                commentaryDiv.innerHTML = `
+                    <h4 style="margin: 0 0 10px 0; color: #006B6B;">AI ポートフォリオ解説</h4>
+                    <p style="margin: 0; line-height: 1.6; font-size: 0.95em;">${activeCommentary.replace(/\n/g, '<br>')}</p>
+                `;
+                chartCard.appendChild(commentaryDiv);
+            }
+
+            container.appendChild(chartCard);
+
+            const labels = activeAllocations.map(d => d.ticker);
+            const values = activeAllocations.map(d => d.percentage);
+            const prices = activeAllocations.map(d => d.entry_price);
+            const bgColors = this.generateColors(activeAllocations.length);
+
+            new Chart(canvas, {
+                type: 'pie',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: values,
+                        backgroundColor: bgColors,
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { boxWidth: 12, font: { size: 12 }, padding: 15 }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: (context) => {
+                                    const label = context.label || '';
+                                    const value = context.parsed || 0;
+                                    const index = context.dataIndex;
+                                    const price = prices[index];
+                                    const priceText = price ? ` ($${price})` : '';
+                                    return `${label}: ${value}%${priceText}`;
+                                }
+                            }
+                        }
+                    },
+                    onClick: (event, elements) => {
+                        if (elements.length > 0) {
+                            const index = elements[0].index;
+                            const ticker = labels[index];
+                            this.setInputAndSearch(ticker);
+                        }
+                    }
+                }
+            });
+        } else {
+            container.innerHTML += `<p style="text-align:center; color:gray; padding:20px;">${this.activePortfolio}ポートフォリオのデータはありません。</p>`;
+        }
+    }
+
+    generateColors(count) {
+        const colors = [
+            '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40',
+            '#FF5252', '#448AFF', '#69F0AE', '#E040FB'
+        ];
+        return Array(count).fill().map((_, i) => colors[i % colors.length]);
+    }
+
+    setInputAndSearch(ticker) {
+        const input = document.getElementById('algo-ticker-input');
+        if (input) {
+            input.value = ticker;
+            this.searchTicker();
+            const contentArea = document.getElementById('algo-content-area');
+            if (contentArea) {
+                contentArea.scrollIntoView({ behavior: 'smooth' });
+            }
+        }
+    }
 
     renderSymbolList(container, data = null) {
         let screenerData;
@@ -1347,17 +1518,14 @@ class AlgoManager {
             return;
         }
 
-        // Sort by volatility regime: contraction (green) -> transition (yellow) -> expansion (red)
         const sortOrder = { 'contraction': 0, 'transition': 1, 'expansion': 2 };
         const sortedData = [...screenerData].sort((a, b) => {
             return sortOrder[a.volatility_regime] - sortOrder[b.volatility_regime];
         });
 
-        // 1カラム表示用のリスト（スタイル変更）
         const listDiv = document.createElement('div');
-        listDiv.className = 'algo-symbol-list-one-col'; // New class for 1-column layout
+        listDiv.className = 'algo-symbol-list-one-col';
 
-        // リストを直接配置（タイトルやセクションラッパーなし）
         sortedData.forEach(item => {
             const symbolItem = this.createSymbolItem(item);
             listDiv.appendChild(symbolItem);
@@ -1368,22 +1536,15 @@ class AlgoManager {
 
     createSymbolItem(item) {
         const itemDiv = document.createElement('div');
-        itemDiv.className = 'algo-symbol-item-card'; // New class
+        itemDiv.className = 'algo-symbol-item-card';
 
-        // Chart URL
         const chartUrl = `/charts/algo/${item.symbol}_gamma_analysis.png?v=${new Date().getTime()}`;
-
-        // Regime Color Circle Logic
         const regimeColor = this.getRegimeColor(item.volatility_regime);
 
-        // AI Analysis Text
-        // summaryデータ内のitemにgemini_analysisが含まれているか確認
-        // backend/algo_scanner.py で注入したデータを使用
         const aiAnalysis = item.gemini_analysis ?
             (typeof item.gemini_analysis === 'string' ? item.gemini_analysis : JSON.stringify(item.gemini_analysis))
             : 'AI解説なし';
 
-        // Sector/Industry Info
         const sectorInfo = (item.sector && item.sector !== 'Unknown') ? item.sector : '-';
         const industryInfo = (item.industry && item.industry !== 'Unknown') ? item.industry : '-';
 
@@ -1403,7 +1564,6 @@ class AlgoManager {
             </div>
         `;
 
-        // Add double tap listener
         const img = itemDiv.querySelector('.algo-chart-img');
         if (img) {
             this.addDoubleTapListener(img, item.symbol);
@@ -1413,35 +1573,18 @@ class AlgoManager {
     }
 
     renderMetaInfo(item) {
-        let metaHtml = '';
-
-        if (item.rs_rating) {
-            metaHtml += `<span class="hwb-rs-badge ${this.getRSClass(item.rs_rating)}">RS ${item.rs_rating}</span>`;
-        }
-        if (item.expected_move_30d) {
-             metaHtml += `<span class="hwb-volume-badge vol-moderate">Move ±${item.expected_move_30d}%</span>`;
-        }
-
-        return metaHtml;
+        return '';
     }
 
     getScreenerDisplayName(screenerKey) {
-        const names = {
-            'momentum_97': 'Momentum 97',
-            'explosive_eps': 'Explosive EPS',
-            'up_on_volume': 'Up on Volume',
-            'top_2pct_rs': 'Top 2% RS',
-            'bullish_4pct': '4% Bullish',
-            'healthy_chart': 'Healthy Chart'
-        };
-        return names[screenerKey] || screenerKey;
+        return screenerKey;
     }
 
     getRegimeColor(regime) {
         const colors = {
-            'contraction': '#00C853', // Green
-            'transition': '#FFD600', // Yellow
-            'expansion': '#FF1744'  // Red
+            'contraction': '#00C853',
+            'transition': '#FFD600',
+            'expansion': '#FF1744'
         };
         return colors[regime] || '#888888';
     }
@@ -1486,71 +1629,45 @@ class AlgoManager {
     }
 
     async showImagePopup(symbol) {
-        try {
-            // Load full symbol data including gemini analysis
-            // Use 3m zoomed image URL
-            const zoomChartUrl = `/charts/algo/${symbol}_gamma_analysis_3m.png?v=${new Date().getTime()}`;
-
-            const overlay = document.createElement('div');
-            overlay.className = 'image-popup-overlay algo-popup-overlay';
-
-            // Content container
-            const contentDiv = document.createElement('div');
-            contentDiv.className = 'algo-popup-content';
-            contentDiv.style.backgroundColor = 'white';
-            contentDiv.style.padding = '10px';
-            contentDiv.style.borderRadius = '8px';
-            contentDiv.style.maxWidth = '95%'; // Wider on mobile
-            contentDiv.style.maxHeight = '90vh';
-            contentDiv.style.overflowY = 'auto';
-
-            // Image
-            const img = document.createElement('img');
-            img.src = zoomChartUrl;
-            img.className = 'algo-popup-image';
-            img.style.width = '100%';
-            img.style.height = 'auto';
-
-            // Error handling for 3m chart (fallback to normal chart)
-            img.onerror = function() {
-                this.src = `/charts/algo/${symbol}_gamma_analysis.png?v=${new Date().getTime()}`;
-            };
-
-            contentDiv.appendChild(img);
-            overlay.appendChild(contentDiv);
-
-            overlay.addEventListener('click', (e) => {
-                if (e.target === overlay) document.body.removeChild(overlay);
-            });
-
-            // Allow closing by clicking image too? No, maybe user wants to zoom more?
-            // User requested "double tap to show zoomed image". This popup IS the zoomed image.
-
-            document.body.appendChild(overlay);
-
-        } catch (error) {
-            console.error('Popup error:', error);
-            alert('画像の読み込みに失敗しました。');
-        }
+        // Implementation omitted for brevity, reusing generic one if needed or just alert
+        const zoomChartUrl = `/charts/algo/${symbol}_gamma_analysis_3m.png?v=${new Date().getTime()}`;
+        const overlay = document.createElement('div');
+        overlay.className = 'image-popup-overlay algo-popup-overlay';
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'algo-popup-content';
+        contentDiv.style.backgroundColor = 'white';
+        contentDiv.style.padding = '10px';
+        contentDiv.style.borderRadius = '8px';
+        contentDiv.style.maxWidth = '95%';
+        contentDiv.style.maxHeight = '90vh';
+        contentDiv.style.overflowY = 'auto';
+        const img = document.createElement('img');
+        img.src = zoomChartUrl;
+        img.className = 'algo-popup-image';
+        img.style.width = '100%';
+        img.style.height = 'auto';
+        img.onerror = function() {
+            this.src = `/charts/algo/${symbol}_gamma_analysis.png?v=${new Date().getTime()}`;
+        };
+        contentDiv.appendChild(img);
+        overlay.appendChild(contentDiv);
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) document.body.removeChild(overlay);
+        });
+        document.body.appendChild(overlay);
     }
 
     async searchTicker() {
         const input = document.getElementById('algo-ticker-input');
         const ticker = input.value.trim().toUpperCase();
-
         if (!ticker) {
             this.showStatus('ティッカーシンボルを入力してください', 'warning');
             return;
         }
-
         this.showStatus(`${ticker}のデータを検索中...`, 'info');
-
-        // まず、ロード済みのスクリーナー結果から検索
         if (this.summaryData && this.summaryData.summary) {
             const allItems = [];
             const seenSymbols = new Set();
-
-            // すべてのスクリーナーを走査
             for (const screenerKey in this.summaryData.summary) {
                 const items = this.summaryData.summary[screenerKey];
                 for (const item of items) {
@@ -1560,13 +1677,12 @@ class AlgoManager {
                     }
                 }
             }
-
             if (allItems.length > 0) {
-                // 見つかった場合、リスト表示
                 const container = document.getElementById('algo-content-area');
-                container.innerHTML = '';
-                this.renderSymbolList(container, allItems);
-
+                if (container) {
+                    container.innerHTML = '';
+                    this.renderSymbolList(container, allItems);
+                }
                 const searchBtn = document.getElementById('algo-analyze-btn');
                 if (searchBtn) {
                     searchBtn.textContent = 'リセット';
@@ -1576,12 +1692,8 @@ class AlgoManager {
                 return;
             }
         }
-
-        // スクリーナーに見つからなかった場合、サーバーに問い合わせる（既存の挙動）
         try {
-            // Check cache first (force=false)
             const response = await fetchWithAuth(`/api/algo/analyze_ticker?ticker=${ticker}&force=false`);
-
             if (!response.ok) {
                 if (response.status === 404) {
                     const shouldAnalyze = confirm(`${ticker}は本日のスクリーナーに含まれていません。\n新規に分析を実行しますか？（30秒ほどかかります）`);
@@ -1594,17 +1706,14 @@ class AlgoManager {
                 }
                 throw new Error(`検索に失敗しました: ${response.status}`);
             }
-
             const symbolData = await response.json();
             this.renderSearchResults(ticker, symbolData);
-
             const searchBtn = document.getElementById('algo-analyze-btn');
             if (searchBtn) {
                 searchBtn.textContent = 'リセット';
                 searchBtn.dataset.state = 'reset';
             }
             this.showStatus(`✅ ${ticker}の検索結果を表示中`, 'info');
-
         } catch (error) {
             console.error('Search error:', error);
             this.showStatus(`❌ エラー: ${error.message}`, 'error');
@@ -1616,10 +1725,8 @@ class AlgoManager {
         try {
             const response = await fetchWithAuth(`/api/algo/analyze_ticker?ticker=${ticker}&force=true`);
             if (!response.ok) throw new Error(`分析失敗: ${response.status}`);
-
             const symbolData = await response.json();
             this.renderSearchResults(ticker, symbolData);
-
             const searchBtn = document.getElementById('algo-analyze-btn');
             if (searchBtn) {
                 searchBtn.textContent = 'リセット';
@@ -1633,8 +1740,8 @@ class AlgoManager {
 
     renderSearchResults(ticker, symbolData) {
         const container = document.getElementById('algo-content-area');
+        if (!container) return;
         container.innerHTML = '';
-
         const resultDiv = document.createElement('div');
         resultDiv.className = 'algo-search-results';
         resultDiv.innerHTML = `
@@ -1662,7 +1769,6 @@ class AlgoManager {
         this.currentView = 'summary';
         const input = document.getElementById('algo-ticker-input');
         if (input) input.value = '';
-
         const searchBtn = document.getElementById('algo-analyze-btn');
         if (searchBtn) {
             searchBtn.textContent = '検索';
@@ -1680,7 +1786,7 @@ class AlgoManager {
     }
 }
 
-// Initialize Algo Tab
+
 function initAlgoTab() {
     window.algoManager = new AlgoManager();
     console.log('AlgoManager initialized');

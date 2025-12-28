@@ -87,3 +87,31 @@ class AlgoDataManager:
         except Exception as e:
             logger.error(f"Error loading symbol data for {symbol}: {e}")
             return None
+
+    def load_previous_daily_summary(self) -> Optional[Dict]:
+        """
+        前回のデイリーサマリーをロード
+        latest.json以外の最新の日付ファイルを探す
+        """
+        try:
+            files = [f for f in os.listdir(self.daily_dir) if f.startswith('algo_') and f.endswith('.json')]
+            if not files:
+                return None
+
+            # 日付順にソート (ファイル名は algo_YYYY-MM-DD.json なので文字列ソートでOK)
+            files.sort(reverse=True)
+
+            # 最新のファイル（今日のがあればそれを除外したいが、実行タイミングによる）
+            # ここではシンプルに最新のアーカイブを返す（今日実行済みなら今日のが返るかもしれないが、
+            # ポートフォリオ生成前なら昨日のものになるはず...いや、save_daily_summaryは最後に呼ばれるので、
+            # この関数を呼ぶ時点では今日のアーカイブはまだ作成されていないはず）
+
+            latest_archive = files[0]
+            archive_path = os.path.join(self.daily_dir, latest_archive)
+
+            with open(archive_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+
+        except Exception as e:
+            logger.error(f"Error loading previous summary: {e}")
+            return None

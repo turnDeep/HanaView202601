@@ -108,6 +108,10 @@ class AlgoScanner:
                         sector = profile.get('sector', 'Unknown') if profile else 'Unknown'
                         industry = profile.get('industry', 'Unknown') if profile else 'Unknown'
 
+                        # Fetch current price (for portfolio entry price)
+                        price_data = db.get_price_history(ticker, days=1)
+                        current_price = price_data.iloc[0]['close'] if price_data is not None and not price_data.empty else None
+
                         # StageAlgoで分析
                         analysis_result = await self.analyze_symbol(ticker)
 
@@ -118,6 +122,7 @@ class AlgoScanner:
                                 'symbol': ticker, # Keep compatibility
                                 'sector': sector,
                                 'industry': industry,
+                                'price': current_price,
                                 **item, # Include all metrics from screener
                                 **analysis_result
                             }
@@ -155,8 +160,20 @@ class AlgoScanner:
             if 'db' in locals():
                 db.close()
 
-        # 3. サマリーを保存
+        # 3. ポートフォリオ生成 (全スクリーナーの結果から)
+        all_analyzed_symbols = []
+        seen_tickers = set()
+        for symbols in summary.values():
+            for symbol_data in symbols:
+                if symbol_data['ticker'] not in seen_tickers:
+                    all_analyzed_symbols.append(symbol_data)
+                    seen_tickers.add(symbol_data['ticker'])
+
+        portfolios = await self.generate_portfolio_recommendations(all_analyzed_symbols)
+
+        # 4. サマリーを保存
         summary_data = {
+            'portfolios': portfolios,
             'scan_date': datetime.now().strftime('%Y-%m-%d'),
             'scan_time': datetime.now().strftime('%H:%M:%S'),
             'total_scanned': sum(len(symbols) for symbols in summary.values()),
@@ -265,6 +282,81 @@ class AlgoScanner:
         except Exception as e:
             logger.error(f"Error analyzing {ticker}: {e}")
             return None
+
+    async def generate_portfolio_recommendations(self, all_symbols: List[Dict]) -> Dict:
+        """
+        全抽出銘柄から3つのポートフォリオ（Aggressive, Balanced, Defensive）を生成
+        """
+        if not all_symbols:
+            return {}
+
+        try:
+            # 1. 過去のポートフォリオを取得（差分分析用）
+            prev_summary = self.data_manager.load_previous_daily_summary()
+            prev_portfolios = prev_summary.get('portfolios', {}) if prev_summary else {}
+
+            # 2. プロンプト用データ構築
+            candidates = []
+            for item in all_symbols:
+                candidates.append({
+                    "ticker": item['ticker'],
+                    "price": item.get('price'), # 現在価格（終値）
+                    "sector": item.get('sector'),
+                    "industry": item.get('industry'),
+                    "volatility_regime": item.get('volatility_regime'),
+                    "gemini_analysis": item.get('gemini_analysis') # 個別分析結果も参考にする
+                })
+
+            prompt = f"""
+あなたはプロのポートフォリオマネージャーです。
+以下の抽出された有望銘柄リスト（候補銘柄）から、リスク許容度の異なる3つのモデルポートフォリオ（Aggressive, Balanced, Defensive）を構築してください。
+また、前回のポートフォリオ構成と比較して、変更点（新規採用、除外、継続）とその理由を解説してください。
+
+【候補銘柄リスト (今回の購入可能銘柄)】
+{json.dumps(candidates, ensure_ascii=False, indent=2)}
+
+【前回のポートフォリオ構成】
+{json.dumps(prev_portfolios, ensure_ascii=False, indent=2)}
+
+【要件】
+1. **Aggressive Portfolio**: ハイリスク・ハイリターン。成長性やモメンタムを重視。
+2. **Balanced Portfolio**: リスクとリターンのバランスを重視。分散投資。
+3. **Defensive Portfolio**: 安定性重視。ボラティリティが低い、またはディフェンシブなセクター。
+
+【制約】
+- 各ポートフォリオは最大10銘柄まで（良い銘柄がなければ少なくても可、0でも可）。
+- 各ポートフォリオ内での配分比率（percentage）を決めること（合計100%になるように）。
+- **entry_price** には、候補銘柄リストにある `price` を使用すること。
+- **commentary** には、前回のポートフォリオからの変更理由を記述すること。
+  - 例: 「NVDAを新規採用（モメンタム強）、AAPLは候補から外れたため除外（利確/損切り）」など。
+  - 今回が初回（前回データなし）の場合は、選定理由のみで良い。
+- 出力は**必ず以下のJSON形式**のみとすること。Markdownコードブロックは不要。
+
+{{
+  "aggressive": {{
+    "allocations": [
+        {{ "ticker": "AAPL", "percentage": 40, "entry_price": 150.5 }},
+        {{ "ticker": "NVDA", "percentage": 60, "entry_price": 400.0 }}
+    ],
+    "commentary": "ポートフォリオの変更点と選定理由の解説..."
+  }},
+  "balanced": {{
+    "allocations": [ ... ],
+    "commentary": "..."
+  }},
+  "defensive": {{ ... }}
+}}
+"""
+            response_text = gemini_client.generate_content(prompt)
+            if not response_text:
+                return {}
+
+            clean_text = response_text.replace('```json', '').replace('```', '').strip()
+            return json.loads(clean_text)
+
+        except Exception as e:
+            logger.error(f"Error generating portfolio recommendations: {e}")
+            return {}
 
     async def generate_batch_gemini_analysis(self, screener_key: str, symbols_data: List[Dict]) -> Dict[str, str]:
         """Gemini APIで一括解説生成"""
