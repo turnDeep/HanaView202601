@@ -307,6 +307,12 @@ class AlgoScanner:
                     "gemini_analysis": item.get('gemini_analysis') # 個別分析結果も参考にする
                 })
 
+            # 前回データがない場合のメッセージ
+            if not prev_portfolios:
+                prev_portfolio_text = "（データなし：今回は初回構築、または前回データが不足しているため、すべての銘柄を新規採用の候補として扱ってください）"
+            else:
+                prev_portfolio_text = json.dumps(prev_portfolios, ensure_ascii=False, indent=2)
+
             prompt = f"""
 あなたはプロのポートフォリオマネージャーです。
 以下の抽出された有望銘柄リスト（候補銘柄）から、リスク許容度の異なる3つのモデルポートフォリオ（Aggressive, Balanced, Defensive）を構築してください。
@@ -316,7 +322,7 @@ class AlgoScanner:
 {json.dumps(candidates, ensure_ascii=False, indent=2)}
 
 【前回のポートフォリオ構成】
-{json.dumps(prev_portfolios, ensure_ascii=False, indent=2)}
+{prev_portfolio_text}
 
 【要件】
 1. **Aggressive Portfolio**: ハイリスク・ハイリターン。成長性やモメンタムを重視。
@@ -330,7 +336,7 @@ class AlgoScanner:
 - **entry_price** には、候補銘柄リストにある `price` を使用すること。
 - **commentary** には、前回のポートフォリオからの変更理由を記述すること。
   - 例: 「NVDAを新規採用（モメンタム強）、AAPLは候補から外れたため除外（利確/損切り）」など。
-  - 今回が初回（前回データなし）の場合は、選定理由のみで良い。
+  - 今回が初回（前回データなし）の場合は、すべての銘柄を新規採用として扱い、選定理由を記述すること。
 - 出力は**必ず以下のJSON形式**のみとすること。Markdownコードブロックは不要。
 
 {{
