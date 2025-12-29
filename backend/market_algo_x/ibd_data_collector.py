@@ -689,33 +689,23 @@ class IBDDataCollector:
 
     # ==================== Industry Group RS 計算 ====================
 
-    def calculate_and_store_industry_group_rs(self, tickers_list: List[str] = None):
+    def calculate_and_store_industry_group_rs(self, rs_ranks: Dict[str, int]):
         """
         全銘柄のIndustry Group RSを計算してDBに保存
-        計算式: (3ヶ月変動率*0.4 + 6ヶ月変動率*0.2 + 9ヶ月変動率*0.2 + 12ヶ月変動率*0.2)
+        Correct Logic: Industry Group RS is the aggregate (average) of the RS Ratings of its constituent stocks.
 
         Args:
-            tickers_list: ティッカーリスト（Noneの場合はDB内の全銘柄）
+            rs_ranks: {ticker: rs_rating_rank(0-99)} - Calculated in Step 1
         """
-        if tickers_list is None:
-            tickers_list = self.db.get_all_tickers()
-
-        # Ranking Scope Correction:
-        # ランキング計算は常に市場全体（DB内の全銘柄）を対象に行う必要があります。
-        # 部分的な更新であっても、産業グループ全体のスコアは全構成銘柄から算出されるべきだからです。
         all_tickers = self.db.get_all_tickers()
-        print(f"\nIndustry Group RSを計算中（全銘柄対象: {len(all_tickers)} 銘柄）...")
+        print(f"\nIndustry Group RSを計算中（集計対象: {len(all_tickers)} 銘柄）...")
 
-        # 1. 銘柄ごとのパフォーマンスデータを収集
-        # 各産業グループごとのパフォーマンスリストを作成: { 'IndustryName': [score1, score2, ...] }
-        industry_scores = {}
+        # 1. Group RS Ratings by Industry
+        industry_rs_map = {} # {'Software': [90, 85, ...]}
         ticker_industries = {}
 
         count = 0
-        for idx, ticker in enumerate(all_tickers):
-            if (idx + 1) % 500 == 0:
-                print(f"  進捗: {idx + 1}/{len(all_tickers)} 銘柄 (データ収集中)")
-
+        for ticker in all_tickers:
             # プロファイルから産業を取得
             profile = self.db.get_company_profile(ticker)
             if not profile or not profile.get('industry'):
@@ -725,74 +715,56 @@ class IBDDataCollector:
             sector = profile.get('sector', 'Unknown')
             ticker_industries[ticker] = {'industry': industry, 'sector': sector}
 
-            # 株価データを取得
-            prices_df = self.db.get_price_history(ticker, days=400) # 1年分以上
-            if prices_df is None or len(prices_df) < 252:
-                continue
+            # Get the RS Rating for this ticker (pre-calculated)
+            rs_rank = rs_ranks.get(ticker)
+            if rs_rank is not None:
+                if industry not in industry_rs_map:
+                    industry_rs_map[industry] = []
+                industry_rs_map[industry].append(rs_rank)
 
-            try:
-                close = prices_df['close'].values
-                # 変動率を計算 (3m=63d, 6m=126d, 9m=189d, 12m=252d)
-                # インデックスは後ろから取得 (最新が-1)
-
-                chg_3m = (close[-1] / close[-63] - 1) * 100 if len(close) >= 63 and close[-63] != 0 else 0
-                chg_6m = (close[-1] / close[-126] - 1) * 100 if len(close) >= 126 and close[-126] != 0 else 0
-                chg_9m = (close[-1] / close[-189] - 1) * 100 if len(close) >= 189 and close[-189] != 0 else 0
-                chg_12m = (close[-1] / close[-252] - 1) * 100 if len(close) >= 252 and close[-252] != 0 else 0
-
-                # IBD式スコア計算
-                weighted_score = (chg_3m * 0.4) + (chg_6m * 0.2) + (chg_9m * 0.2) + (chg_12m * 0.2)
-
-                if industry not in industry_scores:
-                    industry_scores[industry] = []
-                industry_scores[industry].append(weighted_score)
-
-            except Exception:
-                continue
-
-        # 2. 産業ごとの平均スコアを計算してランク付け
-        industry_avg_scores = {}
-        for industry, scores in industry_scores.items():
+        # 2. Calculate average RS Rating for each industry
+        industry_avg_rs = {}
+        for industry, scores in industry_rs_map.items():
             if len(scores) > 0:
-                # 外れ値の影響を減らすため、中央値を使用することも検討できるが、今回は平均を使用
-                industry_avg_scores[industry] = np.mean(scores)
+                industry_avg_rs[industry] = np.mean(scores)
 
-        # スコアでソートしてランク付け (A-E)
-        sorted_industries = sorted(industry_avg_scores.items(), key=lambda x: x[1], reverse=True)
+        # 3. Rank the Industries (0-99)
+        sorted_industries = sorted(industry_avg_rs.items(), key=lambda x: x[1], reverse=True)
         total_industries = len(sorted_industries)
 
-        industry_ranks = {} # Industry -> Percentile (0-99)
+        industry_group_ranks = {} # IndustryName -> Rank(0-99)
 
         if total_industries > 0:
-            for i, (ind, score) in enumerate(sorted_industries):
-                # 上位ほど高いランク値 (99が最高)
+            for i, (ind, avg_score) in enumerate(sorted_industries):
+                # Rank 99 is best, 0 is worst
                 rank_val = 99 - (i / total_industries * 99)
-                industry_ranks[ind] = rank_val
+                industry_group_ranks[ind] = int(rank_val)
 
         print(f"  {total_industries} の産業グループをランク付けしました")
 
-        # 3. データベースに保存
+        # 4. Save to DB
         save_count = 0
         for ticker, info in ticker_industries.items():
             industry = info['industry']
             sector = info['sector']
 
-            # この銘柄の産業ランク値
-            rank_val = industry_ranks.get(industry, 0)
+            rank_val = industry_group_ranks.get(industry, 0)
 
-            # DBに保存
-            # stock_rs_value, sector_rs_value は今回は簡易的に0またはrank_valと同じとする
+            # Use the ticker's individual RS rating as stock_rs_value
+            stock_rs = rs_ranks.get(ticker, 0)
+
             self.db.insert_industry_group_rs(
                 ticker=ticker,
                 sector=sector,
                 industry=industry,
-                stock_rs_value=0, # 個別のスコアは別途計算済みRS値があるため省略
-                sector_rs_value=0,
+                stock_rs_value=stock_rs,
+                sector_rs_value=0, # Not currently calculated
                 industry_group_rs_value=rank_val
             )
             save_count += 1
 
         print(f"  {save_count} 銘柄にIndustry Group RSを割り当てました\n")
+        return industry_group_ranks
 
     # ==================== レーティング計算と保存 ====================
 
@@ -803,10 +775,10 @@ class IBDDataCollector:
         rs_values = self.db.get_all_rs_values()
         eps_components = self.db.get_all_eps_components()
         smr_components = self.db.get_all_smr_components()
-        industry_rs_values = self.db.get_all_industry_group_rs() # 追加
         tickers = self.db.get_all_tickers()
 
-        # --- RS Rating ---
+        # --- Step 1: RS Rating Calculation ---
+        # (Needed first for Industry Group RS)
         sorted_rs = sorted([(k, v) for k, v in rs_values.items() if v is not None], key=lambda x: x[1])
         rs_ranks = {}
         n_rs = len(sorted_rs)
@@ -814,21 +786,62 @@ class IBDDataCollector:
             for i, (t, v) in enumerate(sorted_rs):
                 rs_ranks[t] = int(1 + (i / n_rs) * 98)
 
-        # --- EPS Rating ---
-        eps_scores = []
-        for t, comps in eps_components.items():
-            g1 = min(comps.get('eps_growth_last_qtr') or 0, 500)
-            g2 = min(comps.get('eps_growth_prev_qtr') or 0, 500)
-            g3 = min(comps.get('annual_growth_rate') or 0, 100)
-            score = (g1 * 0.4) + (g2 * 0.2) + (g3 * 0.2) + ((comps.get('stability_score') or 0) * 0.2)
-            eps_scores.append((t, score))
+        # --- Step 2: Industry Group RS Calculation ---
+        # (Pass RS ranks to aggregate)
+        industry_group_ranks = self.calculate_and_store_industry_group_rs(rs_ranks)
 
-        sorted_eps = sorted(eps_scores, key=lambda x: x[1])
+        # --- Step 3: EPS Rating (Updated Logic: 70% Recent Growth, 30% Annual Growth) ---
+        eps_data_recent = []
+        eps_data_annual = []
+
+        for t, comps in eps_components.items():
+            # Recent Growth: Weighted average of last 2 quarters (Current Q 60%, Prior Q 40%)
+            g1 = comps.get('eps_growth_last_qtr')
+            g2 = comps.get('eps_growth_prev_qtr')
+
+            recent_growth = -9999
+            if g1 is not None and g2 is not None:
+                recent_growth = (0.6 * min(g1, 500)) + (0.4 * min(g2, 500))
+            elif g1 is not None:
+                recent_growth = min(g1, 500)
+
+            # Annual Growth (3-5yr CAGR)
+            annual_growth = comps.get('annual_growth_rate') or -9999
+
+            eps_data_recent.append((t, recent_growth))
+            eps_data_annual.append((t, annual_growth))
+
+        def calc_rank_map(data_list):
+            sorted_list = sorted(data_list, key=lambda x: x[1])
+            rank_map = {}
+            n = len(sorted_list)
+            if n > 0:
+                for i, (t, v) in enumerate(sorted_list):
+                    rank_map[t] = (i / n) * 100
+            return rank_map
+
+        eps_recent_ranks = calc_rank_map(eps_data_recent)
+        eps_annual_ranks = calc_rank_map(eps_data_annual)
+
         eps_ranks = {}
-        n_eps = len(sorted_eps)
+        for t in tickers:
+            if t in eps_components:
+                r_recent = eps_recent_ranks.get(t, 0)
+                r_annual = eps_annual_ranks.get(t, 0)
+
+                # IBD-like Weight: 70% Recent, 30% Annual
+                weighted_eps_score = (r_recent * 0.7) + (r_annual * 0.3)
+
+                # Convert score back to percentile rank (0-99)
+                eps_ranks[t] = weighted_eps_score # Store score first, rank later if needed, but 0-100 score is close enough to rank for now
+
+        # Normalize EPS Ranks to 1-99 strictly
+        sorted_eps_final = sorted([(t, s) for t, s in eps_ranks.items()], key=lambda x: x[1])
+        n_eps = len(sorted_eps_final)
+        final_eps_ranks = {}
         if n_eps > 0:
-            for i, (t, v) in enumerate(sorted_eps):
-                eps_ranks[t] = int(1 + (i / n_eps) * 98)
+            for i, (t, s) in enumerate(sorted_eps_final):
+                final_eps_ranks[t] = int(1 + (i / n_eps) * 98)
 
         # --- SMR Rating (Updated Logic: 40% Sales, 30% Margin, 30% ROE Ranks) ---
         # 1. 各コンポーネントのランクを計算
@@ -886,12 +899,22 @@ class IBDDataCollector:
         # --- 保存とComposite Rating (Updated Hybrid Model) ---
         # Composite = 0.3*EPS + 0.3*RS + 0.2*SMR + 0.1*AD + 0.1*Grp
 
+        # Need to rebuild industry_rs_values for final ticker lookup
+        # industry_group_ranks gives Industry -> Rank. We need Ticker -> Rank.
+        industry_rs_values = {}
+        for ticker in tickers:
+            profile = self.db.get_company_profile(ticker)
+            if profile and profile.get('industry'):
+                ind_name = profile.get('industry')
+                if ind_name in industry_group_ranks:
+                    industry_rs_values[ticker] = industry_group_ranks[ind_name]
+
         count = 0
         letter_to_score = {'A': 95, 'B': 80, 'C': 60, 'D': 40, 'E': 20}
 
         for ticker in tickers:
             rs_rank = rs_ranks.get(ticker, 0)
-            eps_rank = eps_ranks.get(ticker, 0)
+            eps_rank = final_eps_ranks.get(ticker, 0) # Corrected to use normalized ranks
 
             # SMR
             smr_r = smr_ratings_map.get(ticker, 'C')
@@ -1017,13 +1040,12 @@ class IBDDataCollector:
         # 7. SMR要素計算
         self.calculate_and_store_smr_components(collected_tickers)
 
-        # 8. Industry Group RS計算
-        self.calculate_and_store_industry_group_rs(collected_tickers)
-
-        # 9. レーティング計算
+        # 8. レーティング計算 (Industry Group RSの集計を含む)
+        # Note: Industry Group RS logic is now integrated into calculate_and_store_ratings
+        # because it requires RS Ratings to be calculated first.
         self.calculate_and_store_ratings()
 
-        # 10. 統計表示
+        # 9. 統計表示
         self.db.get_database_stats()
 
         print(f"\n{'='*80}")
