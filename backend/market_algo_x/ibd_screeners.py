@@ -228,9 +228,9 @@ class IBDScreeners:
         Momentum 97 スクリーナー
 
         条件:
-        - 1W Rank (Pct) ≥ 97%
         - 1M Rank (Pct) ≥ 97%
         - 3M Rank (Pct) ≥ 97%
+        - 6M Rank (Pct) ≥ 97%
         """
         print("\n=== Momentum 97 スクリーナー実行中 ===")
 
@@ -240,12 +240,12 @@ class IBDScreeners:
         # 全銘柄のパフォーマンスを取得
         for ticker in tickers_list:
             price_metrics = self.get_price_metrics(ticker)
-            # Ensure we have data for 1W, 1M, and 3M
-            if price_metrics and price_metrics.get('pct_1w') is not None and price_metrics.get('pct_1m') is not None and price_metrics.get('pct_3m') is not None:
+            # Ensure we have data for 1M, 3M, and 6M
+            if price_metrics and price_metrics.get('pct_1m') is not None and price_metrics.get('pct_3m') is not None and price_metrics.get('pct_6m') is not None:
                 performance_data[ticker] = {
-                    '1w': price_metrics['pct_1w'],
                     '1m': price_metrics['pct_1m'],
-                    '3m': price_metrics['pct_3m']
+                    '3m': price_metrics['pct_3m'],
+                    '6m': price_metrics['pct_6m']
                 }
 
         # 各期間でパーセンタイルランクを計算
@@ -257,23 +257,23 @@ class IBDScreeners:
             total = len(sorted_items)
             return {t: ((idx + 1) / total) * 100 for idx, (t, v) in enumerate(sorted_items)}
 
-        rank_1w = calc_percentile_ranks(performance_data, '1w')
         rank_1m = calc_percentile_ranks(performance_data, '1m')
         rank_3m = calc_percentile_ranks(performance_data, '3m')
+        rank_6m = calc_percentile_ranks(performance_data, '6m')
 
         # フィルタリング
         passed = []
         for ticker in performance_data.keys():
-            r1 = rank_1w.get(ticker, 0)
-            r2 = rank_1m.get(ticker, 0)
-            r3 = rank_3m.get(ticker, 0)
+            r1 = rank_1m.get(ticker, 0)
+            r2 = rank_3m.get(ticker, 0)
+            r3 = rank_6m.get(ticker, 0)
 
             if r1 >= 97 and r2 >= 97 and r3 >= 97:
                 passed.append({
                     'ticker': ticker,
-                    'momentum_rank_1w': round(r1, 2),
-                    'momentum_rank_1m': round(r2, 2),
-                    'momentum_rank_3m': round(r3, 2)
+                    'momentum_rank_1m': round(r1, 2),
+                    'momentum_rank_3m': round(r2, 2),
+                    'momentum_rank_6m': round(r3, 2)
                 })
 
         print(f"  合格: {len(passed)} 銘柄")
@@ -285,8 +285,7 @@ class IBDScreeners:
 
         条件:
         - RS Rating ≥ 80
-        - RS STS% ≥ 80
-        - EPS Growth Last Qtr ≥ 100%
+        - EPS Est Cur Qtr % ≥ 100% (Proxy: EPS Growth Last Qtr)
         - 50-Day Avg Vol ≥ 100K
         - Price vs 50-Day ≥ 0.0%
         """
@@ -295,15 +294,6 @@ class IBDScreeners:
         passed = []
         all_ratings = self.db.get_all_ratings()
 
-        # デバッグ: 最初の銘柄でRS STS%をテスト
-        import os
-        debug_mode = os.getenv('IBD_DEBUG', 'false').lower() == 'true'
-        if debug_mode and len(all_ratings) > 0:
-            test_ticker = list(all_ratings.keys())[0]
-            print(f"\n  DEBUG: Testing RS STS% calculation for {test_ticker}")
-            test_rs_sts = self.get_rs_sts_percentile(test_ticker, debug=True)
-            print(f"  DEBUG: Result: {test_rs_sts}\n")
-
         for ticker, rating in all_ratings.items():
             try:
                 # RS Rating チェック
@@ -311,17 +301,8 @@ class IBDScreeners:
                 if rs_rating is None or rs_rating < 80:
                     continue
 
-                # RS STS% チェック
-                rs_sts = self.get_rs_sts_percentile(ticker)
-                # For demo purposes, we skip filtering if RS STS is None or low
-                # if rs_sts is None:
-                #     # print(f"  DEBUG: {ticker} - RS STS% is None (データ不足またはエラー)")
-                #     continue
-                # if rs_sts < 80:
-                #     # print(f"  DEBUG: {ticker} - RS STS% = {rs_sts:.2f} < 80")
-                #     continue
-
                 # EPS Growth チェック
+                # Note: Using Last Qtr Actual as Proxy for Est Cur Qtr (Limitation)
                 eps_components = self.db.get_all_eps_components()
                 if ticker not in eps_components:
                     continue
@@ -343,7 +324,6 @@ class IBDScreeners:
                 passed.append({
                     'ticker': ticker,
                     'rs_rating': rs_rating,
-                    'rs_sts_percentile': rs_sts,
                     'eps_growth_last_qtr': eps_growth,
                     'avg_vol_50': vol_metrics['avg_vol_50'],
                     'price_vs_50ma': round(price_vs_50ma, 2)
@@ -365,7 +345,6 @@ class IBDScreeners:
         - 50-Day Avg Vol ≥ 100K
         - Market Cap ≥ $250M
         - RS Rating ≥ 80
-        - RS STS% ≥ 80
         - EPS % Chg Last Qtr ≥ 20%
         - A/D Rating ABC
         """
@@ -379,13 +358,6 @@ class IBDScreeners:
                 # RS Rating チェック
                 rs_rating = rating['rs_rating']
                 if rs_rating is None or rs_rating < 80:
-                    continue
-
-                # RS STS% チェック
-                rs_sts = self.get_rs_sts_percentile(ticker)
-                if rs_sts is None:
-                    continue
-                if rs_sts < 80:
                     continue
 
                 # A/D Rating チェック
@@ -437,7 +409,6 @@ class IBDScreeners:
                     'price_change_pct': price_metrics['pct_change_1d'],
                     'vol_change_pct': vol_metrics['vol_change_pct'],
                     'rs_rating': rs_rating,
-                    'rs_sts_percentile': rs_sts,
                     'eps_growth_last_qtr': eps_growth
                 })
             except:
@@ -452,7 +423,6 @@ class IBDScreeners:
 
         条件:
         - RS Rating ≥ 98
-        - RS STS% ≥ 80
         - 10Day > 21Day > 50Day
         - 50-Day Avg Vol ≥ 100K
         - Volume ≥ 100K
@@ -468,13 +438,6 @@ class IBDScreeners:
                 # RS Rating チェック
                 rs_rating = rating['rs_rating']
                 if rs_rating is None or rs_rating < 98:
-                    continue
-
-                # RS STS% チェック
-                rs_sts = self.get_rs_sts_percentile(ticker)
-                if rs_sts is None:
-                    continue
-                if rs_sts < 80:
                     continue
 
                 # 移動平均チェック
@@ -505,8 +468,7 @@ class IBDScreeners:
 
                 passed.append({
                     'ticker': ticker,
-                    'rs_rating': rs_rating,
-                    'rs_sts_percentile': rs_sts
+                    'rs_rating': rs_rating
                 })
             except:
                 continue
@@ -526,7 +488,6 @@ class IBDScreeners:
         - Rel Volume > 1
         - Change from Open > 0%
         - Avg Volume 90D > 100K
-        - RS STS% ≥ 80
         """
         print("\n=== 4% Bullish Yesterday スクリーナー実行中 ===")
 
@@ -572,18 +533,10 @@ class IBDScreeners:
                 if market_cap_millions <= 250:
                     continue
 
-                # RS STS% チェック
-                rs_sts = self.get_rs_sts_percentile(ticker)
-                if rs_sts is None:
-                    continue
-                if rs_sts < 80:
-                    continue
-
                 passed.append({
                     'ticker': ticker,
                     'price_change_pct': price_metrics['pct_change_1d'],
-                    'rel_volume': vol_metrics['rel_volume'],
-                    'rs_sts_percentile': rs_sts
+                    'rel_volume': vol_metrics['rel_volume']
                 })
             except:
                 continue
@@ -601,6 +554,7 @@ class IBDScreeners:
         - RS Line New High
         - RS Rating ≥ 90
         - A/D Rating AB
+        - Ind Group RS AB (Rank >= 60)
         - Comp Rating ≥ 80
         - 50-Day Avg Vol ≥ 100K
         """
@@ -623,6 +577,11 @@ class IBDScreeners:
 
                 # A/D Rating チェック
                 if rating['ad_rating'] not in ['A', 'B']:
+                    continue
+
+                # Industry Group RS チェック (A/B -> Top 40% -> Rank >= 60)
+                ind_group_rs = rating.get('industry_group_rs')
+                if ind_group_rs is None or ind_group_rs < 60:
                     continue
 
                 # 移動平均チェック
@@ -649,7 +608,8 @@ class IBDScreeners:
                     'ticker': ticker,
                     'rs_rating': rs_rating,
                     'comp_rating': comp_rating,
-                    'ad_rating': rating['ad_rating']
+                    'ad_rating': rating['ad_rating'],
+                    'industry_group_rs': ind_group_rs
                 })
             except:
                 continue
