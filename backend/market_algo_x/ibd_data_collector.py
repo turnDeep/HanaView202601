@@ -830,52 +830,96 @@ class IBDDataCollector:
             for i, (t, v) in enumerate(sorted_eps):
                 eps_ranks[t] = int(1 + (i / n_eps) * 98)
 
-        # --- SMR Rating ---
-        smr_scores = []
-        for t, comps in smr_components.items():
-            score = 0
-            score += (comps.get('avg_sales_growth_3q') or 0) * 0.4
-            score += (comps.get('pretax_margin_annual') or 0) * 0.3
-            score += (comps.get('roe_annual') or 0) * 0.3
-            smr_scores.append((t, score))
+        # --- SMR Rating (Updated Logic: 40% Sales, 30% Margin, 30% ROE Ranks) ---
+        # 1. 各コンポーネントのランクを計算
+        sales_data = []
+        margin_data = []
+        roe_data = []
 
+        for t, comps in smr_components.items():
+            sales_data.append((t, comps.get('avg_sales_growth_3q') or -9999))
+            margin_data.append((t, comps.get('pretax_margin_annual') or -9999))
+            roe_data.append((t, comps.get('roe_annual') or -9999))
+
+        def calc_rank_map(data_list):
+            sorted_list = sorted(data_list, key=lambda x: x[1])
+            rank_map = {}
+            n = len(sorted_list)
+            if n > 0:
+                for i, (t, v) in enumerate(sorted_list):
+                    rank_map[t] = (i / n) * 100
+            return rank_map
+
+        sales_ranks = calc_rank_map(sales_data)
+        margin_ranks = calc_rank_map(margin_data)
+        roe_ranks = calc_rank_map(roe_data)
+
+        # 2. SMRスコアを計算 (0.4 * SalesRank + 0.3 * MarginRank + 0.3 * ROERank)
+        smr_scores = []
+        for t in tickers:
+            if t in smr_components:
+                s_rank = sales_ranks.get(t, 0)
+                m_rank = margin_ranks.get(t, 0)
+                r_rank = roe_ranks.get(t, 0)
+
+                weighted_smr_score = (s_rank * 0.4) + (m_rank * 0.3) + (r_rank * 0.3)
+                smr_scores.append((t, weighted_smr_score))
+
+        # 3. 最終的なSMR Ratingを計算 (スコアのパーセンタイル)
         sorted_smr = sorted(smr_scores, key=lambda x: x[1])
-        smr_ratings = {}
+        smr_ratings_map = {} # letter grade
+        smr_percentile_map = {} # 0-100 numeric score
+
         n_smr = len(sorted_smr)
         if n_smr > 0:
             for i, (t, v) in enumerate(sorted_smr):
                 p = (i / n_smr) * 100
+                smr_percentile_map[t] = int(p)
+
                 if p >= 80: r = 'A'
                 elif p >= 60: r = 'B'
                 elif p >= 40: r = 'C'
                 elif p >= 20: r = 'D'
                 else: r = 'E'
-                smr_ratings[t] = r
+                smr_ratings_map[t] = r
 
-        # --- 保存とComposite Rating ---
+        # --- 保存とComposite Rating (Updated Hybrid Model) ---
+        # Composite = 0.3*EPS + 0.3*RS + 0.2*SMR + 0.1*AD + 0.1*Grp
+
         count = 0
         letter_to_score = {'A': 95, 'B': 80, 'C': 60, 'D': 40, 'E': 20}
 
         for ticker in tickers:
             rs_rank = rs_ranks.get(ticker, 0)
             eps_rank = eps_ranks.get(ticker, 0)
-            smr_r = smr_ratings.get(ticker, 'C')
+
+            # SMR
+            smr_r = smr_ratings_map.get(ticker, 'C')
+            smr_p = smr_percentile_map.get(ticker, 50) # Use percentile for composite calculation
 
             # A/D Rating (簡易ロジック: RSが高いほど良いとする仮定)
+            # Proxy: Using RS Rank directly as A/D Score if we don't have volume analysis
+            # Map RS Rank to A/D Letter
             if rs_rank >= 90: ad_rating = 'A'
             elif rs_rank >= 70: ad_rating = 'B'
             elif rs_rank >= 50: ad_rating = 'C'
             elif rs_rank >= 30: ad_rating = 'D'
             else: ad_rating = 'E'
 
-            smr_score = letter_to_score.get(smr_r, 60)
-            ad_score = letter_to_score.get(ad_rating, 60)
+            ad_score = letter_to_score.get(ad_rating, 60) # Or could use rs_rank directly as proxy score
 
-            comp_score = (rs_rank * 2 + eps_rank * 2 + smr_score + ad_score) / 6
-            comp_rating = int(comp_score)
-
-            # Industry RSを取得
+            # Industry RS
             ind_rs = industry_rs_values.get(ticker, 0)
+
+            # Updated Composite Formula
+            # 30% EPS, 30% RS, 20% SMR, 10% A/D, 10% Group
+            comp_score = (eps_rank * 0.3) + \
+                         (rs_rank * 0.3) + \
+                         (smr_p * 0.2) + \
+                         (ad_score * 0.1) + \
+                         (ind_rs * 0.1)
+
+            comp_rating = int(comp_score)
 
             self.db.insert_calculated_rating(
                 ticker,
@@ -885,7 +929,7 @@ class IBDDataCollector:
                 smr_rating=smr_r,
                 comp_rating=comp_rating,
                 price_vs_52w_high=0, # 後で更新
-                industry_group_rs=ind_rs # 反映
+                industry_group_rs=ind_rs
             )
             count += 1
 
