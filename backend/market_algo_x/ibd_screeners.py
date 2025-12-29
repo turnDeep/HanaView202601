@@ -228,9 +228,9 @@ class IBDScreeners:
         Momentum 97 スクリーナー
 
         条件:
+        - 1W Rank (Pct) ≥ 97%
         - 1M Rank (Pct) ≥ 97%
         - 3M Rank (Pct) ≥ 97%
-        - 6M Rank (Pct) ≥ 97%
         """
         print("\n=== Momentum 97 スクリーナー実行中 ===")
 
@@ -240,12 +240,12 @@ class IBDScreeners:
         # 全銘柄のパフォーマンスを取得
         for ticker in tickers_list:
             price_metrics = self.get_price_metrics(ticker)
-            # Ensure we have data for 1M, 3M, and 6M
-            if price_metrics and price_metrics.get('pct_1m') is not None and price_metrics.get('pct_3m') is not None and price_metrics.get('pct_6m') is not None:
+            # Ensure we have data for 1W, 1M, and 3M
+            if price_metrics and price_metrics.get('pct_1w') is not None and price_metrics.get('pct_1m') is not None and price_metrics.get('pct_3m') is not None:
                 performance_data[ticker] = {
+                    '1w': price_metrics['pct_1w'],
                     '1m': price_metrics['pct_1m'],
-                    '3m': price_metrics['pct_3m'],
-                    '6m': price_metrics['pct_6m']
+                    '3m': price_metrics['pct_3m']
                 }
 
         # 各期間でパーセンタイルランクを計算
@@ -257,23 +257,23 @@ class IBDScreeners:
             total = len(sorted_items)
             return {t: ((idx + 1) / total) * 100 for idx, (t, v) in enumerate(sorted_items)}
 
+        rank_1w = calc_percentile_ranks(performance_data, '1w')
         rank_1m = calc_percentile_ranks(performance_data, '1m')
         rank_3m = calc_percentile_ranks(performance_data, '3m')
-        rank_6m = calc_percentile_ranks(performance_data, '6m')
 
         # フィルタリング
         passed = []
         for ticker in performance_data.keys():
-            r1 = rank_1m.get(ticker, 0)
-            r2 = rank_3m.get(ticker, 0)
-            r3 = rank_6m.get(ticker, 0)
+            r1 = rank_1w.get(ticker, 0)
+            r2 = rank_1m.get(ticker, 0)
+            r3 = rank_3m.get(ticker, 0)
 
             if r1 >= 97 and r2 >= 97 and r3 >= 97:
                 passed.append({
                     'ticker': ticker,
-                    'momentum_rank_1m': round(r1, 2),
-                    'momentum_rank_3m': round(r2, 2),
-                    'momentum_rank_6m': round(r3, 2)
+                    'momentum_rank_1w': round(r1, 2),
+                    'momentum_rank_1m': round(r2, 2),
+                    'momentum_rank_3m': round(r3, 2)
                 })
 
         print(f"  合格: {len(passed)} 銘柄")
