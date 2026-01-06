@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 import subprocess
 from pathlib import Path
+import numpy as np
 
 # Adjust imports to use the local modules we just created
 from .gemini_client import gemini_client
@@ -32,6 +33,17 @@ logger = logging.getLogger(__name__)
 
 # Paths
 CHARTS_ALGO_PATH = os.getenv("CHARTS_ALGO_PATH", "/app/frontend/charts/algo")
+
+# Custom JSON Encoder for Numpy types
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super(NumpyEncoder, self).default(obj)
 
 # Metric Descriptions for Gemini Prompt
 METRIC_DESCRIPTIONS = {
@@ -319,7 +331,7 @@ class AlgoScanner:
 また、前回のポートフォリオ構成と比較して、変更点（新規採用、除外、継続）とその理由を解説してください。
 
 【候補銘柄リスト (今回の購入可能銘柄)】
-{json.dumps(candidates, ensure_ascii=False, indent=2)}
+{json.dumps(candidates, cls=NumpyEncoder, ensure_ascii=False, indent=2)}
 
 【前回のポートフォリオ構成】
 {prev_portfolio_text}
@@ -401,7 +413,7 @@ class AlgoScanner:
 あなたはプロのテクニカル株式トレーダーです。以下の銘柄リスト（スクリーナー: {screener_key}）について、各銘柄の分析とトレーディング戦略を日本語で作成してください。
 
 【入力データ】
-{json.dumps(prompt_data, ensure_ascii=False, indent=2)}
+{json.dumps(prompt_data, cls=NumpyEncoder, ensure_ascii=False, indent=2)}
 
 【データの定義】
 入力データに含まれる主要な指標の意味は以下の通りです：
