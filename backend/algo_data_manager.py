@@ -5,6 +5,7 @@ Algoスキャンデータの読み書きと管理
 
 import os
 import json
+import math
 import logging
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -43,6 +44,17 @@ class AlgoDataManager:
             logger.error(f"Error saving daily summary: {e}")
             return False
 
+    def _sanitize_data(self, data):
+        """Recursively replace NaN and Infinity with None to ensure JSON compliance."""
+        if isinstance(data, dict):
+            return {k: self._sanitize_data(v) for k, v in data.items()}
+        elif isinstance(data, list):
+            return [self._sanitize_data(v) for v in data]
+        elif isinstance(data, float):
+            if math.isnan(data) or math.isinf(data):
+                return None
+        return data
+
     def load_latest_summary(self) -> Optional[Dict]:
         """最新のサマリーをロード"""
         try:
@@ -52,7 +64,8 @@ class AlgoDataManager:
                 return None
 
             with open(latest_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                data = json.load(f)
+                return self._sanitize_data(data)
 
         except Exception as e:
             logger.error(f"Error loading latest summary: {e}")
@@ -82,7 +95,8 @@ class AlgoDataManager:
                 return None
 
             with open(symbol_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                data = json.load(f)
+                return self._sanitize_data(data)
 
         except Exception as e:
             logger.error(f"Error loading symbol data for {symbol}: {e}")
@@ -110,7 +124,8 @@ class AlgoDataManager:
             archive_path = os.path.join(self.daily_dir, latest_archive)
 
             with open(archive_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                data = json.load(f)
+                return self._sanitize_data(data)
 
         except Exception as e:
             logger.error(f"Error loading previous summary: {e}")
